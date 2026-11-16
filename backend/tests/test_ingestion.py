@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from backend.app.config import get_settings
 from backend.app.db.init_db import init_db
@@ -15,15 +16,10 @@ from backend.app.main import app
 settings = get_settings()
 
 
-@pytest.fixture(scope="module")
-def db_session():
-    """Ensure database schema is initialized and yield an isolated session."""
-    init_db(engine)
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
+@pytest.fixture
+def db_session(db: Session):
+    """Yield an isolated session bound to test database."""
+    return db
 
 
 @pytest.fixture(scope="module")

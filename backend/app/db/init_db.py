@@ -7,7 +7,7 @@ and indexes defined in models.py.
 import logging
 from sqlalchemy import Engine, text
 from backend.app.db.models import Base
-from backend.app.db.session import engine as default_engine
+from backend.app.db import session as db_session
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def init_db(engine: Engine | None = None) -> None:
     Args:
         engine: Optional SQLAlchemy engine instance. Defaults to application default engine.
     """
-    target_engine = engine or default_engine
+    target_engine = engine or db_session.engine
     logger.info("Initializing database with engine: %s", target_engine.url.render_as_string(hide_password=True))
 
     with target_engine.connect() as conn:
@@ -43,7 +43,7 @@ def drop_db(engine: Engine | None = None) -> None:
     Args:
         engine: Optional SQLAlchemy engine instance. Defaults to application default engine.
     """
-    target_engine = engine or default_engine
+    target_engine = engine or db_session.engine
     logger.info("Dropping all database tables...")
     Base.metadata.drop_all(bind=target_engine)
     logger.info("All database tables dropped successfully.")

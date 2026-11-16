@@ -4,8 +4,8 @@ Loads environment variables via pydantic-settings with validation and sensible d
 """
 
 from functools import lru_cache
-from typing import List, Union
-from pydantic import field_validator
+from typing import List, Optional, Union
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,8 +32,16 @@ class Settings(BaseSettings):
 
     # Chunking (in approximate token units)
     parent_chunk_size: int = 1500
-    child_chunk_size: int = 300
-    child_chunk_overlap: int = 50
+    child_chunk_size: int = Field(
+        default=100,
+        validation_alias=AliasChoices("CHILD_CHUNK_TOKENS", "child_chunk_tokens", "child_chunk_size", "CHILD_CHUNK_SIZE"),
+        description="Target child chunk size in tokens (default 100)",
+    )
+    child_chunk_overlap: int = Field(
+        default=20,
+        validation_alias=AliasChoices("CHILD_CHUNK_OVERLAP", "child_chunk_overlap"),
+        description="Target child chunk overlap in tokens (default 20)",
+    )
 
     # Reranker & LLM
     # Supported reranker models:
@@ -47,6 +55,11 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-2.5-flash"
     openai_api_key: str = ""
     llm_timeout: float = 30.0
+    llm_thinking_budget: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_THINKING_BUDGET", "llm_thinking_budget"),
+        description="Thinking / reasoning budget in tokens (0 to disable, -1 automatic, or positive token count)",
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod

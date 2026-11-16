@@ -29,17 +29,16 @@ from backend.app.privacy.masking import mask_pii
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "extract-v1.0"
+PROMPT_VERSION = "extract-v1.1"
 
 EXTRACTION_SYSTEM_PROMPT = """You are an expert clinical data extraction assistant.
 Extract structured clinical information from the provided medical document strictly conforming to the requested schema.
 
 Guidelines:
-1. Extract ONLY what is explicitly stated in the document text.
-2. Do NOT invent, assume, or extrapolate missing values. If a field, dosage, or unit is not specified or is missing, use null (or empty list for diagnosis).
-3. Dates must be formatted as YYYY-MM-DD.
-4. Patient name should be extracted as found in the text (which may be masked as [NAME]).
-5. Medications must include name, dose (number or null), unit (string or null), and frequency instructions.
+1. Extract only what is explicitly in the text. If a value is missing, return null (or an empty list for diagnosis). Do not infer, correct, normalize or repair values, even if they look wrong (for example impossible ages or dates in the wrong order). Never output placeholder strings like '[MISSING UNIT]' for missing values; return null instead.
+2. Dates must be formatted as YYYY-MM-DD.
+3. Patient name should be extracted as found in the text (which may be masked as [NAME]).
+4. Medications must include name, dose (number or null), unit (string or null), and frequency instructions.
 """
 
 
@@ -55,6 +54,10 @@ class ExtractionResult:
     llm_model: str
     latency_ms: float
     page_count: int
+    parse_ms: float = 0.0
+    mask_ms: float = 0.0
+    llm_ms: float = 0.0
+    total_ms: float = 0.0
 
 
 def extract_clinical_document(
@@ -72,14 +75,20 @@ def extract_clinical_document(
     Returns:
         ExtractionResult containing extracted schema, validation issues, and metadata.
     """
+    overall_start = time.perf_counter()
+
     # 1. Parse PDF using Docling with pypdf fallback
+    t_parse = time.perf_counter()
     parsed = parse_pdf(source=source, filename=filename)
     raw_text = "\n\n".join(item.text for item in parsed.items if item.text)
+    parse_ms = round((time.perf_counter() - t_parse) * 1000.0, 2)
 
     # 2. Mask PII before passing text to the LLM
+    t_mask = time.perf_counter()
     mask_result = mask_pii(raw_text)
     masked_text = mask_result.masked_text
     pii_items_masked = mask_result.total_masked
+    mask_ms = round((time.perf_counter() - t_mask) * 1000.0, 2)
 
     # 3. Construct prompt
     prompt = (
@@ -95,7 +104,7 @@ def extract_clinical_document(
     llm_model = llm_adapter.get_model_name()
 
     # 4. Invoke LLM with structured output, retrying ONCE if schema validation fails
-    start_time = time.perf_counter()
+    t_llm = time.perf_counter()
     try:
         raw_output = llm_adapter.generate_structured(prompt, ClinicalExtraction)
         if isinstance(raw_output, ClinicalExtraction):
@@ -128,10 +137,12 @@ def extract_clinical_document(
         else:
             extracted = ClinicalExtraction.model_validate(raw_output)
 
-    latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+    llm_ms = round((time.perf_counter() - t_llm) * 1000.0, 2)
 
     # 5. Run validation rules against extracted data
     validation_issues = validate_extraction(extracted)
+
+    total_ms = round((time.perf_counter() - overall_start) * 1000.0, 2)
 
     return ExtractionResult(
         extraction=extracted,
@@ -140,6 +151,10 @@ def extract_clinical_document(
         pii_items_masked=pii_items_masked,
         prompt_version=PROMPT_VERSION,
         llm_model=llm_model,
-        latency_ms=latency_ms,
+        latency_ms=total_ms,
         page_count=parsed.page_count,
+        parse_ms=parse_ms,
+        mask_ms=mask_ms,
+        llm_ms=llm_ms,
+        total_ms=total_ms,
     )

@@ -98,3 +98,29 @@ This document tracks key architectural decisions, rationale, and documented trad
   - Redacting PII prior to LLM inference prevents PHI exposure outside system boundaries while preserving clinical document layout for downstream tasks.
   - Known limitation: Labelled-field and regex patterns reliably capture demographic headers and common clinical ID formats, but unlabelled proper names embedded within free narrative prose cannot be completely eliminated without risk of false positives on clinical nomenclature.
   - Audit log table strictly records operational metrics (endpoint, document_id, pii_items_masked, latency_ms, status) and never stores document text, prompts, answers, or extracted clinical values.
+
+---
+
+## Decision 008: Phase 4 Statistics Endpoints, Docling Converter Singleton, and Embeddings Migration
+
+- **What was built:**
+  - Implemented cached singleton `get_document_converter()` warmed during FastAPI lifespan to eliminate per-request model reload overhead, adding stage latency instrumentation (`parse_ms`, `mask_ms`, `llm_ms`, `total_ms`) to `/extract`.
+  - Added REST endpoints `GET /stats/overview`, `GET /stats/audit` (with 14-day call trends), `GET /extractions`, and `GET /extractions/{id}` with strict metadata-only Pydantic schemas.
+  - Migrated `HuggingFaceEmbeddings` to standalone `langchain-huggingface==1.2.3` and built automated CLI database seeder `scripts/seed_demo_data.py`.
+- **Why this design:**
+  - Singleton caching of Docling's converter cuts warm-up latency from ~47.2s to ~12.1s and stabilizes PDF parsing to ~4.1s without reloading PyTorch pipeline weights on each call.
+  - Aggregating stats directly in PostgreSQL via SQLAlchemy window/group expressions provides performant dashboard feeds while guaranteeing no raw clinical narrative or PII is ever returned.
+
+---
+
+## Decision 009: Phase 4c Test Isolation, Hierarchical Granularity, and Extraction Honesty
+
+- **What was built:** Isolated unit/integration testing into ephemeral `medidoc_test` PostgreSQL database via `backend/tests/conftest.py` with zero dev database pollution; adjusted child chunk size default to 100 tokens with 20-token overlap sentence-aligned (achieving 386 children across 192 parents, 2.01 avg per parent); and updated clinical extraction prompt to `extract-v1.1` enforcing strict factual honesty without inferring, normalizing, or substituting placeholder strings for missing values.
+- **Why this design:** Dedicated test database fixtures eliminate state bleed and accidental data destruction during automated test runs; smaller 100-token child chunks (2–4 per parent section) increase granular semantic retrieval precision for hybrid ranking while keeping parent context intact; and strict extraction honesty prevents LLMs from hallucinating default medication units or repairing deliberate date/age discrepancies needed by clinical compliance validation rules.
+
+---
+
+## Decision 010: Phase 2d Deterministic Citations, Full Page Ranges, and Thinking Budget
+
+- **What was built:** Implemented `rag-clinical-v1.1` prompt enforcing numeric source citations (`[S1]`, `[S1, S4]`) with deterministic post-generation replacement to `[document, pages]`, invalid citation dropping/flagging, `citations` list in response, full page range exposure across all sources (`page_start`, `page_end`, `"pp. 2-3"`), and configurable `LLM_THINKING_BUDGET`.
+- **Why this design:** Replaces fragile LLM filename/page generation with deterministic metadata substitution while pruning hallucinations (invalid indices); full page ranges guarantee clinical provenance auditability; and setting thinking budget to 0 prevents unnecessary reasoning token overhead, accelerating generation latency to sub-2s.

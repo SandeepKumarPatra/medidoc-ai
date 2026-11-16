@@ -137,7 +137,14 @@ def validate_extraction(
                 )
             )
 
-        if med_unit is None or (isinstance(med_unit, str) and not med_unit.strip()):
+        is_missing_unit = (
+            med_unit is None
+            or (isinstance(med_unit, str) and (
+                not med_unit.strip()
+                or med_unit.strip().lower() in {"[missing unit]", "[missing]", "[none]", "[null]", "null", "none", "unknown"}
+            ))
+        )
+        if is_missing_unit:
             issues.append(
                 ValidationIssueSchema(
                     field=f"medications[{idx}].unit",

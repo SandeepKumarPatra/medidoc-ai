@@ -63,6 +63,7 @@ class GeminiLLMAdapter(BaseLLMAdapter):
         api_key: Optional[str] = None,
         temperature: float = 0.0,
         timeout: Optional[float] = None,
+        thinking_budget: Optional[int] = None,
     ) -> None:
         self.model_name = (
             model_name
@@ -84,6 +85,14 @@ class GeminiLLMAdapter(BaseLLMAdapter):
             if timeout is not None
             else float(os.getenv("LLM_TIMEOUT", str(settings.llm_timeout)))
         )
+        if thinking_budget is not None:
+            self.thinking_budget = thinking_budget
+        else:
+            env_budget = os.getenv("LLM_THINKING_BUDGET")
+            if env_budget is not None and env_budget.strip() != "":
+                self.thinking_budget = int(env_budget)
+            else:
+                self.thinking_budget = settings.llm_thinking_budget
         self._llm = None
 
     def _get_client(self):
@@ -98,15 +107,21 @@ class GeminiLLMAdapter(BaseLLMAdapter):
             from langchain_google_genai import ChatGoogleGenerativeAI
 
             logger.info(
-                "Initializing ChatGoogleGenerativeAI with model=%s, timeout=%.1fs",
+                "Initializing ChatGoogleGenerativeAI with model=%s, timeout=%.1fs, thinking_budget=%s",
                 self.model_name,
                 self.timeout,
+                self.thinking_budget,
             )
+            extra_kwargs: dict[str, Any] = {}
+            if self.thinking_budget is not None:
+                extra_kwargs["thinking_budget"] = self.thinking_budget
+
             self._llm = ChatGoogleGenerativeAI(
                 model=self.model_name,
                 api_key=self.api_key,
                 temperature=self.temperature,
                 timeout=self.timeout,
+                **extra_kwargs,
             )
         return self._llm
 

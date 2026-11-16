@@ -96,7 +96,7 @@ def test_ask_endpoint_success(mock_get_adapter):
 
     # 5. Assert Prompt hidden by default and Prompt Version always present
     assert "prompt" not in data or data["prompt"] is None
-    assert data["prompt_version"] == "rag-clinical-v1.0"
+    assert data["prompt_version"] == "rag-clinical-v1.1"
 
 
 @patch("backend.app.retrieval.qa.get_llm_adapter")
@@ -113,7 +113,7 @@ def test_ask_debug_flag_controls_prompt(mock_get_adapter):
     assert res_default.status_code == 200
     data_default = res_default.json()
     assert "prompt" not in data_default or data_default["prompt"] is None
-    assert data_default["prompt_version"] == "rag-clinical-v1.0"
+    assert data_default["prompt_version"] == "rag-clinical-v1.1"
 
     # 2. debug=true: prompt included
     res_debug = client.post(
@@ -124,7 +124,7 @@ def test_ask_debug_flag_controls_prompt(mock_get_adapter):
     data_debug = res_debug.json()
     assert "prompt" in data_debug and data_debug["prompt"] is not None
     assert "QUESTION: What are infection precautions?" in data_debug["prompt"]
-    assert data_debug["prompt_version"] == "rag-clinical-v1.0"
+    assert data_debug["prompt_version"] == "rag-clinical-v1.1"
 
 
 @patch("backend.app.retrieval.qa.get_llm_adapter")
@@ -240,3 +240,151 @@ def test_gemini_adapter_timeout_enforced():
     with patch.object(adapter, "_invoke", side_effect=slow_invoke):
         with pytest.raises(TimeoutError, match="LLM generation timed out after 0.05s"):
             adapter.generate("Test prompt")
+
+
+def test_format_page_label_ranges():
+    """Assert page labels format single pages as 'p. X' and multi-page ranges as 'pp. X-Y'."""
+    from backend.app.retrieval.qa import format_page_label
+
+    assert format_page_label(1, 1) == "p. 1"
+    assert format_page_label(5, 5) == "p. 5"
+    assert format_page_label(2, 3) == "pp. 2-3"
+    assert format_page_label(1, 7) == "pp. 1-7"
+
+
+def test_replace_source_citations_unit():
+    """Unit test deterministic citation mapping: [S1], [S1, S4], invalid [S9] dropped/flagged, and CitedSource list."""
+    from backend.app.retrieval.qa import SourceCitation, replace_source_citations
+
+    dummy_sources = [
+        SourceCitation(
+            document="sop_infection_control.pdf",
+            pages="pp. 2-3",
+            page_start=2,
+            page_end=3,
+            citation="[sop_infection_control.pdf, pp. 2-3]",
+            section_title="Precautions",
+            score=0.95,
+        ),
+        SourceCitation(
+            document="sop_medication_safety.pdf",
+            pages="p. 4",
+            page_start=4,
+            page_end=4,
+            citation="[sop_medication_safety.pdf, p. 4]",
+            section_title="High Alert Meds",
+            score=0.88,
+        ),
+        SourceCitation(
+            document="sop_blood_transfusion.pdf",
+            pages="pp. 1-2",
+            page_start=1,
+            page_end=2,
+            citation="[sop_blood_transfusion.pdf, pp. 1-2]",
+            section_title="Verification",
+            score=0.75,
+        ),
+        SourceCitation(
+            document="sop_discharge_process.pdf",
+            pages="pp. 5-7",
+            page_start=5,
+            page_end=7,
+            citation="[sop_discharge_process.pdf, pp. 5-7]",
+            section_title="Checklist",
+            score=0.70,
+        ),
+    ]
+
+    # 1. Single and multiple valid citations
+    raw = "Wash hands before contact [S1]. Verify ID and high-alert labels [S1, S4]."
+    ans, cited, dropped = replace_source_citations(raw, dummy_sources)
+
+    assert "[S1]" not in ans
+    assert "[S4]" not in ans
+    assert "[sop_infection_control.pdf, pp. 2-3]" in ans
+    assert "[sop_discharge_process.pdf, pp. 5-7]" in ans
+    assert len(dropped) == 0
+    assert len(cited) == 2
+    assert cited[0].source_index == 1
+    assert cited[0].document == "sop_infection_control.pdf"
+    assert cited[0].pages == "pp. 2-3"
+    assert cited[1].source_index == 4
+    assert cited[1].document == "sop_discharge_process.pdf"
+    assert cited[1].pages == "pp. 5-7"
+
+    # 2. Out-of-bounds citation [S9] is dropped and flagged
+    raw_invalid = "Routine cleaning schedule [S9]. Sharps disposal protocol [S2]."
+    ans_inv, cited_inv, dropped_inv = replace_source_citations(raw_invalid, dummy_sources)
+
+    assert "[S9]" not in ans_inv
+    assert "S9" in dropped_inv
+    assert "[sop_medication_safety.pdf, p. 4]" in ans_inv
+    assert len(cited_inv) == 1
+    assert cited_inv[0].source_index == 2
+    # Ensure dropped [S9] left clean sentence punctuation without trailing space before period
+    assert "Routine cleaning schedule." in ans_inv
+
+    # 3. Mixed valid and invalid inside same bracket: [S1, S9]
+    raw_mixed = "Policy guidance [S1, S9]."
+    ans_mix, cited_mix, dropped_mix = replace_source_citations(raw_mixed, dummy_sources)
+    assert ans_mix == "Policy guidance [sop_infection_control.pdf, pp. 2-3]."
+    assert "S9" in dropped_mix
+    assert len(cited_mix) == 1
+    assert cited_mix[0].source_index == 1
+
+
+@patch("backend.app.retrieval.qa.get_llm_adapter")
+def test_ask_endpoint_deterministic_citations_replacement(mock_get_adapter):
+    """Integration test POST /ask deterministic citation replacement with mocked LLM outputting [S1], [S1, S2], [S9]."""
+    mock_text = (
+        "Staff must sanitize hands upon room entry [S1]. "
+        "Medications require double verification [S1, S2]. "
+        "Unverified external guidance [S9]."
+    )
+    mock_adapter = MockLLMAdapter(response_text=mock_text)
+    mock_get_adapter.return_value = mock_adapter
+
+    payload = {
+        "question": "What are infection control and medication safety protocols?",
+        "mode": "hybrid",
+        "top_k": 3,
+    }
+
+    response = client.post("/ask", json=payload)
+    assert response.status_code == 200, f"/ask failed: {response.text}"
+    data = response.json()
+
+    # 1. Assert [S1], [S2] replaced with real [document, pages]
+    assert "[S1]" not in data["answer"]
+    assert "[S2]" not in data["answer"]
+    assert "[S9]" not in data["answer"]
+    assert ".pdf" in data["answer"]
+    assert ("p." in data["answer"] or "pp." in data["answer"])
+
+    # 2. Assert [S9] was dropped and flagged
+    assert "dropped_citations" in data
+    assert "S9" in data["dropped_citations"]
+
+    # 3. Assert citations list contains actual cited sources with expected attributes
+    assert "citations" in data
+    assert len(data["citations"]) >= 1
+    for c in data["citations"]:
+        assert c["source_index"] in (1, 2)
+        assert c["document"].endswith(".pdf")
+        assert ("p." in c["pages"] or "pp." in c["pages"])
+
+    # 4. Assert sources list includes full page ranges for all retrieved candidates
+    assert "sources" in data
+    assert len(data["sources"]) >= len(data["citations"])
+    for s in data["sources"]:
+        assert s["page_start"] >= 1
+        assert s["page_end"] >= s["page_start"]
+        assert ("p." in s["pages"] or "pp." in s["pages"])
+        assert s["citation"].startswith("[") and s["citation"].endswith("]")
+
+
+def test_gemini_adapter_thinking_budget_configuration():
+    """Assert GeminiLLMAdapter respects LLM_THINKING_BUDGET configuration."""
+    adapter = GeminiLLMAdapter(api_key="fake-key-test", thinking_budget=0)
+    assert adapter.thinking_budget == 0
+

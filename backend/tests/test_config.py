@@ -10,11 +10,12 @@ def test_settings_defaults():
     assert settings.embedding_dim == 384
     assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
     assert settings.parent_chunk_size == 1500
-    assert settings.child_chunk_size == 300
-    assert settings.child_chunk_overlap == 50
+    assert settings.child_chunk_size == 100
+    assert settings.child_chunk_overlap == 20
     assert settings.rerank_candidates == 10
     assert settings.reranker_model == "BAAI/bge-reranker-base"
     assert settings.llm_timeout == 30.0
+    assert settings.llm_thinking_budget is None
     assert "http://localhost:5173" in settings.cors_origins
 
 

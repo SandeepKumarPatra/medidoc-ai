@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from backend.app.db.models import Child, Document, Parent
 from backend.app.db.session import SessionLocal
@@ -13,17 +14,12 @@ from backend.app.retrieval.service import retrieve
 from backend.app.retrieval.sparse import sparse_search
 
 
-@pytest.fixture(scope="module")
-def db_session():
+@pytest.fixture
+def db_session(db: Session):
     """Yield database session connected to running PostgreSQL with pgvector."""
-    session = SessionLocal()
-    try:
-        # Verify database has documents and child vector chunks
-        child_count = session.query(Child).count()
-        assert child_count > 0, "Database must have ingested child chunks before running retrieval tests."
-        yield session
-    finally:
-        session.close()
+    child_count = db.query(Child).count()
+    assert child_count > 0, "Database must have ingested child chunks before running retrieval tests."
+    return db
 
 
 @pytest.mark.parametrize("mode", ["naive", "parent_child", "hybrid", "hybrid_rerank"])

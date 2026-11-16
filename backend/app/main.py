@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Literal, Optional
 
 import torch
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, text
@@ -29,9 +31,10 @@ from backend.app.extraction.extractor import extract_clinical_document
 from backend.app.extraction.schema import ClinicalExtraction
 from backend.app.extraction.validator import ValidationIssueSchema, validate_extraction
 from backend.app.ingestion.embedder import get_embedder
+from backend.app.ingestion.parser import get_document_converter
 from backend.app.ingestion.service import ingest_document
 from backend.app.privacy.audit import record_audit_log
-from backend.app.retrieval.qa import answer_question
+from backend.app.retrieval.qa import CitedSource, answer_question
 from backend.app.retrieval.rerank import get_cross_encoder
 from backend.app.retrieval.service import retrieve
 
@@ -85,6 +88,8 @@ class SourceItem(BaseModel):
 
     document: str = Field(..., description="Document filename")
     pages: str = Field(..., description="Page label (e.g. 'p. 2' or 'pp. 2-3')")
+    page_start: int = Field(..., description="First page number of the source range")
+    page_end: int = Field(..., description="Last page number of the source range")
     citation: str = Field(..., description="Citation string: [document, pages]")
     section_title: str | None = Field(None, description="Section heading")
     score: float = Field(..., description="Relevance score from retrieval")
@@ -96,6 +101,14 @@ class AskResponse(BaseModel):
 
     answer: str = Field(..., description="Synthesized clinical policy answer")
     sources: List[SourceItem] = Field(..., description="Cited source documents and pages")
+    citations: List[CitedSource] = Field(
+        default_factory=list,
+        description="Sources actually cited in the synthesized answer",
+    )
+    dropped_citations: List[str] = Field(
+        default_factory=list,
+        description="Invalid or non-existent citation tags dropped from the answer",
+    )
     retrieved_ids: List[str] = Field(..., description="Retrieved chunk or section IDs")
     timings: dict[str, Any] = Field(..., description="Per-stage latency breakdown and model metadata")
     prompt: Optional[str] = Field(
@@ -128,7 +141,116 @@ class ExtractResponse(BaseModel):
     pii_items_masked: int = Field(..., description="Total count of PII/PHI items redacted prior to LLM call")
     prompt_version: str = Field(..., description="Version of extraction prompt template")
     llm_model: str = Field(..., description="LLM model identifier used for extraction")
-    latency_ms: float = Field(..., description="Extraction latency in milliseconds")
+    parse_ms: float = Field(0.0, description="PDF parsing stage latency in milliseconds")
+    mask_ms: float = Field(0.0, description="PII masking stage latency in milliseconds")
+    llm_ms: float = Field(0.0, description="LLM structured generation stage latency in milliseconds")
+    total_ms: float = Field(..., description="Total request latency in milliseconds")
+    latency_ms: float = Field(..., description="Extraction latency in milliseconds (legacy alias for total_ms)")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StatsOverviewResponse(BaseModel):
+    """Aggregated statistics across documents, extractions, validation, and audit logs."""
+
+    documents_by_type: dict[str, int] = Field(
+        default_factory=dict,
+        description="Document counts grouped by doc_type (sop, discharge, lab)",
+    )
+    total_documents: int = Field(0, description="Total count of indexed documents")
+    parents_total: int = Field(0, description="Total count of parent sections")
+    children_total: int = Field(0, description="Total count of child chunks")
+    extractions_total: int = Field(0, description="Total number of extraction attempts stored")
+    extractions_with_issues: int = Field(0, description="Count of extractions with at least one validation issue")
+    issue_rate: float = Field(0.0, description="Fraction of extractions with validation issues (0.0 to 1.0)")
+    issue_counts_by_rule: dict[str, int] = Field(
+        default_factory=dict,
+        description="Validation issue counts grouped by rule name",
+    )
+    asks_total: int = Field(0, description="Total number of Q&A requests logged in audit_log")
+    avg_latency_ms_by_endpoint: dict[str, float] = Field(
+        default_factory=dict,
+        description="Average latency in ms grouped by endpoint",
+    )
+    total_pii_masked: int = Field(0, description="Total count of PII items masked across all requests")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogRow(BaseModel):
+    """Metadata-only audit log record representation."""
+
+    id: str = Field(..., description="Audit entry UUID")
+    timestamp: str = Field(..., description="ISO 8601 timestamp")
+    endpoint: str = Field(..., description="API endpoint called")
+    document_id: Optional[str] = Field(None, description="Document UUID if associated")
+    pii_items_masked: int = Field(..., description="Number of PII items masked")
+    latency_ms: float = Field(..., description="Request latency in ms")
+    status: str = Field(..., description="Status (success, error)")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DailyCallCount(BaseModel):
+    """Daily invocation count breakdown for charting."""
+
+    date: str = Field(..., description="Date formatted as YYYY-MM-DD")
+    endpoint: str = Field(..., description="API endpoint")
+    count: int = Field(..., description="Call count for that endpoint on that date")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditStatsResponse(BaseModel):
+    """Audit log inspection and historical frequency statistics."""
+
+    recent_logs: List[AuditLogRow] = Field(
+        default_factory=list,
+        description="Recent audit log rows (metadata only, newest first)",
+    )
+    totals_by_endpoint: dict[str, int] = Field(
+        default_factory=dict,
+        description="Total historical call counts per endpoint",
+    )
+    calls_by_day: List[DailyCallCount] = Field(
+        default_factory=list,
+        description="Daily call counts for the last 14 days by endpoint for charts",
+    )
+    total_count: int = Field(0, description="Total matching audit log rows in the database")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExtractionListItem(BaseModel):
+    """Summary of a stored extraction run without raw document text."""
+
+    id: str = Field(..., description="Extraction UUID")
+    document_id: str = Field(..., description="Associated document UUID")
+    filename: str = Field(..., description="Source document filename")
+    doc_type: str = Field(..., description="Document type (discharge, lab, etc.)")
+    created_at: str = Field(..., description="ISO 8601 creation timestamp")
+    issue_count: int = Field(..., description="Count of validation issues flagged")
+    model: str = Field(..., description="LLM model identifier")
+    prompt_version: str = Field(..., description="Extraction prompt version")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExtractionDetailResponse(BaseModel):
+    """Detailed view of an individual clinical extraction with structured JSON and rule issues."""
+
+    id: str = Field(..., description="Extraction UUID")
+    document_id: str = Field(..., description="Associated document UUID")
+    filename: str = Field(..., description="Source document filename")
+    doc_type: str = Field(..., description="Document type (discharge, lab, etc.)")
+    created_at: str = Field(..., description="ISO 8601 creation timestamp")
+    model: str = Field(..., description="LLM model identifier")
+    prompt_version: str = Field(..., description="Extraction prompt version")
+    json_result: dict[str, Any] = Field(..., description="Extracted structured clinical JSON")
+    validation_issues: List[ValidationIssueSchema] = Field(
+        default_factory=list,
+        description="Validation issues flagged against this extraction",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -145,15 +267,16 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not auto-initialize DB on startup (%s); will retry on request.", exc)
 
-    # Warm up embedding model and reranker once at API startup
+    # Warm up embedding model, reranker, and Docling converter once at API startup
     try:
-        logger.info("Warming up embedding model and cross-encoder reranker...")
+        logger.info("Warming up embedding model, cross-encoder reranker, and Docling parser...")
         embedder = get_embedder()
         embedder.embed_query("warmup query")
         reranker = get_cross_encoder()
         with torch.no_grad():
             reranker.predict([["warmup query", "warmup passage"]], batch_size=1, show_progress_bar=False)
-        logger.info("Embedding and reranker models warmed up successfully.")
+        get_document_converter()
+        logger.info("Embedding, reranker, and Docling converter warmed up successfully.")
     except Exception as exc:
         logger.warning("Could not warm up models on startup: %s", exc)
 
@@ -407,6 +530,8 @@ def ask_question_endpoint(
                 SourceItem(
                     document=src.document,
                     pages=src.pages,
+                    page_start=src.page_start,
+                    page_end=src.page_end,
                     citation=src.citation,
                     section_title=src.section_title,
                     score=src.score,
@@ -414,6 +539,8 @@ def ask_question_endpoint(
                 )
                 for src in answer_res.sources
             ],
+            citations=answer_res.citations,
+            dropped_citations=answer_res.timings.get("dropped_citations", []),
             retrieved_ids=answer_res.retrieved_ids,
             timings=answer_res.timings,
             prompt=answer_res.prompt if request.debug else None,
@@ -607,6 +734,10 @@ async def extract_pdf_endpoint(
         pii_items_masked=extraction_res.pii_items_masked,
         prompt_version=extraction_res.prompt_version,
         llm_model=extraction_res.llm_model,
+        parse_ms=round(extraction_res.parse_ms, 2),
+        mask_ms=round(extraction_res.mask_ms, 2),
+        llm_ms=round(extraction_res.llm_ms, 2),
+        total_ms=round(total_latency_ms, 2),
         latency_ms=round(total_latency_ms, 2),
     )
 
@@ -664,4 +795,311 @@ def validate_clinical_data_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to validate clinical data: {exc}",
         )
+
+
+# --- Phase 4 Endpoints: Statistics and Extractions ---
+
+@app.get(
+    "/stats/overview",
+    response_model=StatsOverviewResponse,
+    summary="Get aggregated statistics across documents, extractions, and queries",
+    tags=["Statistics"],
+)
+def get_stats_overview(db: Session = Depends(get_db)) -> StatsOverviewResponse:
+    """Aggregated statistics computed directly from the database:
+    - documents by doc_type (sop, discharge, lab)
+    - total parents and children chunks
+    - extractions_total and extractions_with_issues
+    - issue_rate (ratio of extractions with issues)
+    - issue counts per rule name
+    - asks_total (total Q&A requests in audit_log)
+    - average latency_ms per endpoint
+    - total PII items masked
+    """
+    try:
+        doc_type_rows = (
+            db.query(Document.doc_type, func.count(Document.id))
+            .group_by(Document.doc_type)
+            .all()
+        )
+        documents_by_type = {
+            str(row[0]): int(row[1]) for row in doc_type_rows if row[0] is not None
+        }
+        total_documents = sum(documents_by_type.values())
+
+        parents_total = db.query(func.count(Parent.id)).scalar() or 0
+        children_total = db.query(func.count(Child.id)).scalar() or 0
+
+        extractions_total = db.query(func.count(Extraction.id)).scalar() or 0
+        extractions_with_issues = (
+            db.query(func.count(func.distinct(ValidationIssue.extraction_id)))
+            .filter(ValidationIssue.extraction_id.isnot(None))
+            .scalar()
+            or 0
+        )
+        issue_rate = (
+            round(extractions_with_issues / extractions_total, 4)
+            if extractions_total > 0
+            else 0.0
+        )
+
+        rule_rows = (
+            db.query(ValidationIssue.rule, func.count(ValidationIssue.id))
+            .group_by(ValidationIssue.rule)
+            .all()
+        )
+        issue_counts_by_rule = {
+            str(row[0]): int(row[1]) for row in rule_rows if row[0] is not None
+        }
+
+        asks_total = (
+            db.query(func.count(AuditLog.id))
+            .filter(AuditLog.endpoint == "/ask")
+            .scalar()
+            or 0
+        )
+
+        latency_rows = (
+            db.query(AuditLog.endpoint, func.avg(AuditLog.latency_ms))
+            .group_by(AuditLog.endpoint)
+            .all()
+        )
+        avg_latency_ms_by_endpoint = {
+            str(row[0]): round(float(row[1]), 2)
+            for row in latency_rows
+            if row[0] is not None and row[1] is not None
+        }
+
+        total_pii_masked = (
+            db.query(func.coalesce(func.sum(AuditLog.pii_items_masked), 0)).scalar()
+            or 0
+        )
+
+        return StatsOverviewResponse(
+            documents_by_type=documents_by_type,
+            total_documents=total_documents,
+            parents_total=int(parents_total),
+            children_total=int(children_total),
+            extractions_total=int(extractions_total),
+            extractions_with_issues=int(extractions_with_issues),
+            issue_rate=float(issue_rate),
+            issue_counts_by_rule=issue_counts_by_rule,
+            asks_total=int(asks_total),
+            avg_latency_ms_by_endpoint=avg_latency_ms_by_endpoint,
+            total_pii_masked=int(total_pii_masked),
+        )
+    except Exception as exc:
+        logger.error("Failed to compute stats overview: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load statistics overview: {exc}",
+        )
+
+
+@app.get(
+    "/stats/audit",
+    response_model=AuditStatsResponse,
+    summary="Retrieve audit log entries and historical usage trends",
+    tags=["Statistics"],
+)
+def get_stats_audit(
+    limit: int = Query(
+        default=50, ge=1, le=500, description="Max recent log entries to return"
+    ),
+    endpoint: Optional[str] = Query(
+        default=None, description="Optional endpoint filter (e.g. /ask)"
+    ),
+    db: Session = Depends(get_db),
+) -> AuditStatsResponse:
+    """Retrieve recent audit_log rows (metadata only, newest first), plus totals per endpoint,
+    and calls_by_day for the last 14 days (date, endpoint, count) for dashboard charts.
+    """
+    try:
+        log_query = db.query(AuditLog)
+        if endpoint and endpoint.strip():
+            log_query = log_query.filter(AuditLog.endpoint == endpoint.strip())
+
+        total_matching = log_query.count()
+        recent_rows = (
+            log_query.order_by(AuditLog.timestamp.desc()).limit(limit).all()
+        )
+
+        recent_logs = [
+            AuditLogRow(
+                id=str(row.id),
+                timestamp=row.timestamp.isoformat() if row.timestamp else "",
+                endpoint=row.endpoint,
+                document_id=str(row.document_id) if row.document_id else None,
+                pii_items_masked=row.pii_items_masked,
+                latency_ms=round(row.latency_ms, 2),
+                status=row.status,
+            )
+            for row in recent_rows
+        ]
+
+        totals_query = db.query(
+            AuditLog.endpoint, func.count(AuditLog.id)
+        ).group_by(AuditLog.endpoint)
+        totals_by_endpoint = {
+            str(row[0]): int(row[1]) for row in totals_query.all() if row[0] is not None
+        }
+
+        # Calls by day for the last 14 days
+        fourteen_days_ago = datetime.now(timezone.utc) - timedelta(days=14)
+        day_expr = func.to_char(AuditLog.timestamp, "YYYY-MM-DD").label("day")
+        day_query = (
+            db.query(day_expr, AuditLog.endpoint, func.count(AuditLog.id).label("count"))
+            .filter(AuditLog.timestamp >= fourteen_days_ago)
+            .group_by(day_expr, AuditLog.endpoint)
+            .order_by(day_expr.asc(), AuditLog.endpoint.asc())
+        )
+        if endpoint and endpoint.strip():
+            day_query = day_query.filter(AuditLog.endpoint == endpoint.strip())
+
+        calls_by_day = [
+            DailyCallCount(
+                date=str(row[0]),
+                endpoint=str(row[1]),
+                count=int(row[2]),
+            )
+            for row in day_query.all()
+            if row[0] is not None
+        ]
+
+        return AuditStatsResponse(
+            recent_logs=recent_logs,
+            totals_by_endpoint=totals_by_endpoint,
+            calls_by_day=calls_by_day,
+            total_count=total_matching,
+        )
+    except Exception as exc:
+        logger.error("Failed to query audit statistics: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query audit statistics: {exc}",
+        )
+
+
+@app.get(
+    "/extractions",
+    response_model=List[ExtractionListItem],
+    summary="List recent extractions with validation issue counts",
+    tags=["Extraction & Validation"],
+)
+def list_extractions(
+    limit: int = Query(
+        default=20, ge=1, le=100, description="Max extractions to return"
+    ),
+    db: Session = Depends(get_db),
+) -> List[ExtractionListItem]:
+    """Retrieve recent extractions with id, source document filename, created_at,
+    issue_count, llm model, and prompt_version. Never returns raw document text.
+    """
+    try:
+        issue_counts = (
+            db.query(
+                ValidationIssue.extraction_id,
+                func.count(ValidationIssue.id).label("issue_count"),
+            )
+            .group_by(ValidationIssue.extraction_id)
+            .subquery()
+        )
+
+        rows = (
+            db.query(
+                Extraction,
+                Document.filename,
+                Document.doc_type,
+                func.coalesce(issue_counts.c.issue_count, 0).label("issue_count"),
+            )
+            .join(Document, Extraction.document_id == Document.id)
+            .outerjoin(issue_counts, Extraction.id == issue_counts.c.extraction_id)
+            .order_by(Extraction.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        results: List[ExtractionListItem] = []
+        for ext, fname, dtype, icount in rows:
+            results.append(
+                ExtractionListItem(
+                    id=str(ext.id),
+                    document_id=str(ext.document_id),
+                    filename=fname,
+                    doc_type=dtype,
+                    created_at=ext.created_at.isoformat() if ext.created_at else "",
+                    issue_count=int(icount),
+                    model=ext.model,
+                    prompt_version=ext.prompt_version,
+                )
+            )
+        return results
+    except Exception as exc:
+        logger.error("Failed to list extractions: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve extractions list: {exc}",
+        )
+
+
+@app.get(
+    "/extractions/{id}",
+    response_model=ExtractionDetailResponse,
+    summary="Get structured JSON result and validation issues for an extraction",
+    tags=["Extraction & Validation"],
+)
+def get_extraction_detail(
+    id: str,
+    db: Session = Depends(get_db),
+) -> ExtractionDetailResponse:
+    """Retrieve the stored JSON result and validation issues for a single extraction.
+    Never returns raw document text.
+    """
+    try:
+        extraction_uuid = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Invalid extraction UUID format: '{id}'",
+        )
+
+    extraction = (
+        db.query(Extraction).filter(Extraction.id == extraction_uuid).first()
+    )
+    if not extraction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Extraction with ID '{id}' not found.",
+        )
+
+    doc = db.query(Document).filter(Document.id == extraction.document_id).first()
+    filename = doc.filename if doc else "unknown.pdf"
+    doc_type = doc.doc_type if doc else "unknown"
+
+    issues = (
+        db.query(ValidationIssue)
+        .filter(ValidationIssue.extraction_id == extraction.id)
+        .all()
+    )
+    validation_issues = [
+        ValidationIssueSchema(
+            field=issue.field,
+            rule=issue.rule,
+            severity=issue.severity,
+            message=issue.message,
+        )
+        for issue in issues
+    ]
+
+    return ExtractionDetailResponse(
+        id=str(extraction.id),
+        document_id=str(extraction.document_id),
+        filename=filename,
+        doc_type=doc_type,
+        created_at=extraction.created_at.isoformat() if extraction.created_at else "",
+        model=extraction.model,
+        prompt_version=extraction.prompt_version,
+        json_result=extraction.json_result,
+        validation_issues=validation_issues,
+    )
 

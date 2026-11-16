@@ -13,11 +13,29 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
+
+# Module-level cached singleton for Docling DocumentConverter
+_document_converter: Optional[Any] = None
+
+
+def get_document_converter() -> Any:
+    """Return cached module-level singleton instance of Docling DocumentConverter.
+    
+    Ensures OCR and layout analysis models are initialized once at startup rather
+    than reloaded on every PDF conversion request.
+    """
+    global _document_converter
+    if _document_converter is None:
+        from docling.document_converter import DocumentConverter
+
+        logger.info("Initializing cached singleton Docling DocumentConverter...")
+        _document_converter = DocumentConverter()
+    return _document_converter
 
 
 @dataclass
@@ -53,8 +71,6 @@ def parse_pdf_docling(
     Returns:
         ParsedDocument containing structural items with page numbers.
     """
-    from docling.document_converter import DocumentConverter
-
     temp_path: Optional[str] = None
     if isinstance(source, bytes):
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -65,7 +81,7 @@ def parse_pdf_docling(
         pdf_path = Path(source)
 
     try:
-        converter = DocumentConverter()
+        converter = get_document_converter()
         result = converter.convert(pdf_path)
         doc = result.document
 

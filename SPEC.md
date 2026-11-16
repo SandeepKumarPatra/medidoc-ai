@@ -76,7 +76,7 @@ Use pgvector with an HNSW or IVFFlat index on children.embedding.
 
 1. Receive PDF. Parse with Docling (sections, headings, tables, page numbers); fall back to pypdf.
 2. Build parent sections (max about 1500 tokens; split larger ones).
-3. Split parents into child chunks of about 300 tokens, sentence-aligned, small overlap, using LangChain text splitters.
+3. Split parents into child chunks of about 100 tokens (CHILD_CHUNK_TOKENS default 100, overlap 20, sentence-aligned), using LangChain text splitters.
 4. Embed children with the configured embedding model.
 5. Insert parents and children. Fill tsv with to_tsvector('english', text).
 6. Record the document and its status.
@@ -92,11 +92,14 @@ All four modes live behind one function `retrieve(question, mode, top_k)`:
 | hybrid | pgvector similarity (top 50) + Postgres full-text rank (top 50), merged by Reciprocal Rank Fusion (k=60), then parent expansion |
 | hybrid_rerank | hybrid candidates, cross-encoder rerank, then parent expansion |
 
-Answer generation:
+Answer generation (prompt_version rag-clinical-v1.1):
 - Use ONLY the retrieved context.
-- Cite sources as [document, pages].
+- LLM cites sources strictly using bracketed numeric labels like [S1] or [S1, S4], never filenames or pages.
+- Post-generation pipeline deterministically replaces [S#] with verified metadata citations formatted [document, pages] across the full range page_start to page_end (e.g. "p. 3" or "pp. 2-3").
+- Any citation to a non-existent source index is dropped from the answer text and flagged.
 - If the context does not contain the answer, reply that it was not found.
-- Return answer, sources, retrieved ids, latency per stage.
+- Response includes answer, sources (all retrieved candidates with full page range), citations (sources actually cited: source_index, document, pages, section_title), retrieved ids, latency per stage.
+- LLM_THINKING_BUDGET configuration controls reasoning token depth for sub-2s generation.
 
 ## 6. Extraction, validation, privacy (Phase 3)
 

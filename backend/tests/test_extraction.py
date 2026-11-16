@@ -307,7 +307,7 @@ def test_validator_specific_rules():
 # ==============================================================================
 
 @patch("backend.app.extraction.extractor.get_llm_adapter")
-def test_extract_endpoint_and_database_persistence(mock_get_adapter):
+def test_extract_endpoint_and_database_persistence(mock_get_adapter, db: Session):
     """Assert POST /extract returns validated extraction and persists rows to extractions & validation_issues."""
     json_path = DATA_DIR / "discharge_summary_01_cardiac.json"
     pdf_path = DATA_DIR / "discharge_summary_01_cardiac.pdf"
@@ -340,27 +340,23 @@ def test_extract_endpoint_and_database_persistence(mock_get_adapter):
     assert body["extraction"]["patient"]["name"] == "Arthur Pendelton"
 
     # Verify rows in database
-    db: Session = SessionLocal()
-    try:
-        doc = db.query(Document).filter(Document.filename == pdf_path.name).first()
-        assert doc is not None, f"Document record for {pdf_path.name} not found"
+    doc = db.query(Document).filter(Document.filename == pdf_path.name).first()
+    assert doc is not None, f"Document record for {pdf_path.name} not found"
 
-        extraction_row = db.query(Extraction).filter(Extraction.document_id == doc.id).order_by(Extraction.created_at.desc()).first()
-        assert extraction_row is not None, "Extraction row was not saved in extractions table"
-        assert extraction_row.prompt_version == PROMPT_VERSION
-        assert extraction_row.model == "mock-gemini-extraction"
-        assert extraction_row.json_result["patient"]["name"] == "Arthur Pendelton"
-        assert len(extraction_row.json_result["medications"]) == 4
+    extraction_row = db.query(Extraction).filter(Extraction.document_id == doc.id).order_by(Extraction.created_at.desc()).first()
+    assert extraction_row is not None, "Extraction row was not saved in extractions table"
+    assert extraction_row.prompt_version == PROMPT_VERSION
+    assert extraction_row.model == "mock-gemini-extraction"
+    assert extraction_row.json_result["patient"]["name"] == "Arthur Pendelton"
+    assert len(extraction_row.json_result["medications"]) == 4
 
-        # Validate issues table count for this clean extraction
-        issues_rows = db.query(ValidationIssue).filter(ValidationIssue.extraction_id == extraction_row.id).all()
-        assert len(issues_rows) == 0
-    finally:
-        db.close()
+    # Validate issues table count for this clean extraction
+    issues_rows = db.query(ValidationIssue).filter(ValidationIssue.extraction_id == extraction_row.id).all()
+    assert len(issues_rows) == 0
 
 
 @patch("backend.app.extraction.extractor.get_llm_adapter")
-def test_extract_endpoint_persists_validation_issues(mock_get_adapter):
+def test_extract_endpoint_persists_validation_issues(mock_get_adapter, db: Session):
     """Assert POST /extract persists deliberate validation issues to validation_issues table."""
     json_path = DATA_DIR / "discharge_summary_04_error_dates.json"
     pdf_path = DATA_DIR / "discharge_summary_04_error_dates.pdf"
@@ -384,20 +380,16 @@ def test_extract_endpoint_persists_validation_issues(mock_get_adapter):
     assert len(body["validation_issues"]) == 1
     assert body["validation_issues"][0]["rule"] == "discharge_date_before_admission"
 
-    db: Session = SessionLocal()
-    try:
-        doc = db.query(Document).filter(Document.filename == pdf_path.name).first()
-        assert doc is not None
+    doc = db.query(Document).filter(Document.filename == pdf_path.name).first()
+    assert doc is not None
 
-        extraction_row = db.query(Extraction).filter(Extraction.document_id == doc.id).order_by(Extraction.created_at.desc()).first()
-        assert extraction_row is not None
+    extraction_row = db.query(Extraction).filter(Extraction.document_id == doc.id).order_by(Extraction.created_at.desc()).first()
+    assert extraction_row is not None
 
-        issues_rows = db.query(ValidationIssue).filter(ValidationIssue.extraction_id == extraction_row.id).all()
-        assert len(issues_rows) == 1
-        assert issues_rows[0].rule == "discharge_date_before_admission"
-        assert issues_rows[0].field == "discharge_date"
-    finally:
-        db.close()
+    issues_rows = db.query(ValidationIssue).filter(ValidationIssue.extraction_id == extraction_row.id).all()
+    assert len(issues_rows) == 1
+    assert issues_rows[0].rule == "discharge_date_before_admission"
+    assert issues_rows[0].field == "discharge_date"
 
 
 def test_validate_endpoint():
@@ -437,49 +429,45 @@ def test_validate_endpoint():
 # 5. Audit Log Privacy Invariant Test
 # ==============================================================================
 
-def test_audit_log_never_contains_document_text():
+def test_audit_log_never_contains_document_text(db: Session):
     """Assert no row in the audit_log table contains document text, prompts, or patient data."""
-    db: Session = SessionLocal()
-    try:
-        # Record sample audit entries
-        record_audit_log(db, endpoint="/ask", latency_ms=120.5, pii_items_masked=0, status="success")
-        record_audit_log(db, endpoint="/extract", latency_ms=450.2, pii_items_masked=5, status="success")
-        record_audit_log(db, endpoint="/validate", latency_ms=15.1, pii_items_masked=0, status="success")
-        record_audit_log(db, endpoint="/ingest", latency_ms=890.0, pii_items_masked=0, status="success")
+    # Record sample audit entries
+    record_audit_log(db, endpoint="/ask", latency_ms=120.5, pii_items_masked=0, status="success")
+    record_audit_log(db, endpoint="/extract", latency_ms=450.2, pii_items_masked=5, status="success")
+    record_audit_log(db, endpoint="/validate", latency_ms=15.1, pii_items_masked=0, status="success")
+    record_audit_log(db, endpoint="/ingest", latency_ms=890.0, pii_items_masked=0, status="success")
 
-        rows = db.query(AuditLog).all()
-        assert len(rows) >= 4, "Expected at least 4 audit rows"
+    rows = db.query(AuditLog).all()
+    assert len(rows) >= 4, "Expected at least 4 audit rows"
 
-        # Allowed column names on the AuditLog model
-        allowed_columns = {
-            "id",
-            "timestamp",
-            "endpoint",
-            "document_id",
-            "pii_items_masked",
-            "latency_ms",
-            "status",
-        }
+    # Allowed column names on the AuditLog model
+    allowed_columns = {
+        "id",
+        "timestamp",
+        "endpoint",
+        "document_id",
+        "pii_items_masked",
+        "latency_ms",
+        "status",
+    }
 
-        actual_columns = {col.name for col in AuditLog.__table__.columns}
-        assert actual_columns == allowed_columns, (
-            f"AuditLog table contains unauthorized columns! Found: {actual_columns - allowed_columns}"
-        )
+    actual_columns = {col.name for col in AuditLog.__table__.columns}
+    assert actual_columns == allowed_columns, (
+        f"AuditLog table contains unauthorized columns! Found: {actual_columns - allowed_columns}"
+    )
 
-        # Inspect all records to ensure strictly metadata values
-        for row in rows:
-            assert row.endpoint in {"/ask", "/ingest", "/extract", "/validate"}
-            assert isinstance(row.pii_items_masked, int)
-            assert isinstance(row.latency_ms, float)
-            assert row.status in {"success", "error"}
+    # Inspect all records to ensure strictly metadata values
+    for row in rows:
+        assert row.endpoint in {"/ask", "/ingest", "/extract", "/validate"}
+        assert isinstance(row.pii_items_masked, int)
+        assert isinstance(row.latency_ms, float)
+        assert row.status in {"success", "error"}
 
-            # Confirm no text fields exist on the instance
-            for col in actual_columns:
-                val = getattr(row, col)
-                if isinstance(val, str) and col not in {"id", "endpoint", "status"}:
-                    pytest.fail(f"Unexpected string value in audit column {col}: {val}")
-    finally:
-        db.close()
+        # Confirm no text fields exist on the instance
+        for col in actual_columns:
+            val = getattr(row, col)
+            if isinstance(val, str) and col not in {"id", "endpoint", "status"}:
+                pytest.fail(f"Unexpected string value in audit column {col}: {val}")
 
 
 # ==============================================================================

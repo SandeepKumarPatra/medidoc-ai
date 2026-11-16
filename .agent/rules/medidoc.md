@@ -13,3 +13,6 @@
 - After each task, tell me exactly how to run it and how to verify it (command or URL).
 - Keep code simple and readable. The developer must be able to explain every file.
 - If something is unclear or a package fails to install, stop and ask instead of guessing.
+
+- After each phase, update README.md so it matches the current project: features,
+  quickstart commands that actually work, endpoint list, and a status table.

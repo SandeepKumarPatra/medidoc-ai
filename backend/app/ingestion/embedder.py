@@ -10,7 +10,7 @@ import logging
 from functools import lru_cache
 from typing import List
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from backend.app.config import get_settings
 
