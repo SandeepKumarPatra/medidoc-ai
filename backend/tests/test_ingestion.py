@@ -55,7 +55,7 @@ def test_ingest_synthetic_sop_into_postgres(db_session):
 
     # 1. Assert Ingestion Result Summary
     assert result.status == "completed"
-    assert result.page_count == 2
+    assert 6 <= result.page_count <= 10
     assert result.parent_chunks > 0
     assert result.child_chunks >= result.parent_chunks
 
@@ -65,7 +65,7 @@ def test_ingest_synthetic_sop_into_postgres(db_session):
     assert doc.filename == "sop_infection_control.pdf"
     assert doc.doc_type == "sop"
     assert doc.status == "completed"
-    assert doc.page_count == 2
+    assert doc.page_count == result.page_count
 
     # 3. Assert Parent Records
     parents = db_session.execute(

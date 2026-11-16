@@ -13,7 +13,16 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import random
 from typing import Any, Dict, List, Optional
+
+# Ensure deterministic generation
+random.seed(42)
+
+try:
+    from data.sop_data import SOP_DEFINITIONS, SOP_QUESTIONS
+except ImportError:
+    from sop_data import SOP_DEFINITIONS, SOP_QUESTIONS
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -182,786 +191,156 @@ def get_document_styles() -> Dict[str, ParagraphStyle]:
 
 
 # ============================================================================
-# SOP GENERATORS (5 Multi-page Policies with Tables)
+# SOP GENERATORS (12 Multi-page Policies with Tables, 6-10 Pages Each)
 # ============================================================================
+
+
+def generate_sop_from_spec(sop_spec: Dict[str, Any], output_path: Path) -> None:
+    """Generate a multi-page SOP PDF adhering to 6-10 pages from a structured specification."""
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=letter,
+        leftMargin=54,
+        rightMargin=54,
+        topMargin=54,
+        bottomMargin=54,
+    )
+    styles = get_document_styles()
+    story: List[Any] = []
+
+    # Page 1 Header block
+    story.append(Paragraph(sop_spec["subtitle"], styles["subtitle"]))
+    story.append(Paragraph(sop_spec["title"], styles["title"]))
+    metadata_line = (
+        f"<b>Document ID:</b> {sop_spec['doc_id']} | "
+        f"<b>Effective Date:</b> {sop_spec['effective_date']} | "
+        f"<b>Review Cycle:</b> {sop_spec['review_cycle']} | "
+        f"<b>Department:</b> {sop_spec['department']}"
+    )
+    story.append(Paragraph(metadata_line, styles["body"]))
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1.5,
+            color=colors.HexColor("#2B6CB0"),
+            spaceBefore=3,
+            spaceAfter=8,
+        )
+    )
+
+    pages = sop_spec["pages"]
+    num_pages = len(pages)
+
+    for p_idx, page_blocks in enumerate(pages):
+        for block in page_blocks:
+            b_type = block.get("type")
+            if b_type == "section":
+                heading_text = block.get("heading", "")
+                story.append(Paragraph(heading_text, styles["h1"]))
+                for para in block.get("content", []):
+                    story.append(Paragraph(para, styles["body"]))
+            elif b_type == "table":
+                col_widths = block.get("col_widths", [100, 100, 100, 100, 100])
+                header_cells = [
+                    Paragraph(h, styles["table_header"]) for h in block.get("header", [])
+                ]
+                table_rows = [header_cells]
+                for row in block.get("rows", []):
+                    table_rows.append([
+                        Paragraph(cell, styles["table_cell"]) for cell in row
+                    ])
+                t = Table(table_rows, colWidths=col_widths)
+                t.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
+                            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                            ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
+                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
+                            ("TOPPADDING", (0, 0), (-1, -1), 3),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                        ]
+                    )
+                )
+                story.append(Spacer(1, 3))
+                story.append(t)
+                story.append(Spacer(1, 4))
+
+        if p_idx < num_pages - 1:
+            story.append(PageBreak())
+
+    doc.build(story, canvasmaker=NumberedCanvas)
 
 
 def generate_sop_infection_control(output_path: Path) -> None:
     """Generate multi-page SOP for Infection Control with isolation categories table."""
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-    )
-    styles = get_document_styles()
-    story: List[Any] = []
-
-    # Header block
-    story.append(
-        Paragraph("METROPOLITAN GENERAL HOSPITAL — POLICY & PROCEDURE", styles["subtitle"])
-    )
-    story.append(
-        Paragraph(
-            "STANDARD OPERATING PROCEDURE: INFECTION PREVENTION AND TRANSMISSION-BASED ISOLATION CONTROLS",
-            styles["title"],
-        )
-    )
-    story.append(
-        Paragraph(
-            "<b>Document ID:</b> SOP-INF-2026-01 | <b>Effective Date:</b> 2026-01-01 | <b>Review Cycle:</b> Annual | <b>Department:</b> Epidemiology & Quality",
-            styles["body"],
-        )
-    )
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=1.5,
-            color=colors.HexColor("#2B6CB0"),
-            spaceBefore=4,
-            spaceAfter=10,
-        )
-    )
-
-    story.append(Paragraph("1.0 Purpose and Operational Objective", styles["h1"]))
-    story.append(
-        Paragraph(
-            "This standard operating procedure defines clinical guidelines and operational requirements "
-            "for preventing hospital-acquired infections (HAIs) across inpatient wards, surgical suites, "
-            "and intensive care units. The primary objective is early pathogen identification, effective barrier "
-            "precautions, and safe decontamination workflows to minimize cross-transmission risk.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("2.0 Scope and Regulatory Mandate", styles["h1"]))
-    story.append(
-        Paragraph(
-            "This policy applies to all clinical personnel, nursing staff, allied healthcare providers, "
-            "environmental services teams, and visiting observers. Compliance with CDC guidelines, WHO "
-            "recommendations, and state department of health infection benchmarks is mandatory. Failure "
-            "to adhere to isolation protocols triggers immediate clinical review.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("3.0 Standard Universal Precautions & Hand Hygiene", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Hand hygiene must be performed according to the 'Five Moments for Hand Hygiene': (1) before "
-            "touching a patient, (2) before clean/aseptic procedures, (3) after body fluid exposure risk, "
-            "(4) after touching a patient, and (5) after touching patient surroundings. Alcohol-based hand rub "
-            "(ABHR) with minimum 70% ethyl alcohol is standard, except when caring for patients with Clostridioides difficile, "
-            "where soap and water friction washing for at least 20 seconds is mandatory.",
-            styles["body"],
-        )
-    )
-
-    story.append(PageBreak())
-
-    # Page 2
-    story.append(Paragraph("4.0 Transmission-Based Isolation Categories", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Patients confirmed or suspected of harboring epidemiological target pathogens must be "
-            "placed on transmission-based precautions immediately upon clinical suspicion. The table below "
-            "summarizes mandatory precautions, PPE requirements, and ventilation specifications.",
-            styles["body"],
-        )
-    )
-
-    table_data = [
-        [
-            Paragraph("Category", styles["table_header"]),
-            Paragraph("Target Pathogens", styles["table_header"]),
-            Paragraph("Mandatory PPE", styles["table_header"]),
-            Paragraph("Room Ventilation / Placement", styles["table_header"]),
-            Paragraph("Terminal Cleaning", styles["table_header"]),
-        ],
-        [
-            Paragraph("<b>Contact</b>", styles["table_cell"]),
-            Paragraph("MRSA, VRE, C. difficile, Acinetobacter", styles["table_cell"]),
-            Paragraph("Gown and non-sterile gloves upon entry", styles["table_cell"]),
-            Paragraph("Private room or cohorting; dedicated equipment", styles["table_cell"]),
-            Paragraph("Sodium hypochlorite (bleach) 1:10 solution", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Droplet</b>", styles["table_cell"]),
-            Paragraph("Influenza, Neisseria meningitidis, Pertussis", styles["table_cell"]),
-            Paragraph("Surgical mask + face shield within 6 feet", styles["table_cell"]),
-            Paragraph("Private room; door may remain open", styles["table_cell"]),
-            Paragraph("Standard hospital-grade disinfectant", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Airborne</b>", styles["table_cell"]),
-            Paragraph("M. tuberculosis, Measles, Varicella, SARS-CoV", styles["table_cell"]),
-            Paragraph("Fit-tested N95 or PAPR respirator", styles["table_cell"]),
-            Paragraph("AIIR negative pressure room (≥12 ACH, -2.5 Pa)", styles["table_cell"]),
-            Paragraph("UV-C disinfection post-discharge + 1 hr air clear", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Protective</b>", styles["table_cell"]),
-            Paragraph("Neutropenic (<500 ANC), Allogeneic HSCT", styles["table_cell"]),
-            Paragraph("Mask, surgical gown, strict sterile barrier", styles["table_cell"]),
-            Paragraph("Positive pressure room (HEPA filtration ≥99.97%)", styles["table_cell"]),
-            Paragraph("Daily sporicidal wiping; no fresh plants/flowers", styles["table_cell"]),
-        ],
-    ]
-
-    t = Table(table_data, colWidths=[65, 115, 110, 115, 95])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("5.0 Environmental Decontamination & Disinfection Timelines", styles["h1"]))
-    story.append(
-        Paragraph(
-            "High-touch surfaces (bed rails, IV pumps, call buttons, computer workstations) must be cleaned "
-            "at least twice daily and after patient discharge. Terminal room cleaning following discharge "
-            "of an isolation patient requires a minimum contact wet time of 4 minutes for quaternary ammonium "
-            "compounds and 10 minutes for bleach solutions. All environmental rounds are documented in the EMR log.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("6.0 Clinical Governance, Audit, and Breach Escalation", styles["h1"]))
-    story.append(
-        Paragraph(
-            "The Infection Control Committee conducts weekly unannounced observational audits across all units. "
-            "Hand hygiene compliance targets are set at ≥95%. Any cluster of two or more nosocomial infections "
-            "in the same unit within a 14-day window requires an immediate sentinel outbreak investigation "
-            "and notification of the Chief Medical Officer within 4 hours.",
-            styles["body"],
-        )
-    )
-
-    doc.build(story, canvasmaker=NumberedCanvas)
+    generate_sop_from_spec(SOP_DEFINITIONS["infection_control"], output_path)
 
 
 def generate_sop_discharge_process(output_path: Path) -> None:
     """Generate multi-page SOP for Inpatient Discharge Planning and Transitions."""
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-    )
-    styles = get_document_styles()
-    story: List[Any] = []
-
-    story.append(
-        Paragraph("METROPOLITAN HEALTH SYSTEM — POLICY & PROCEDURE", styles["subtitle"])
-    )
-    story.append(
-        Paragraph(
-            "STANDARD OPERATING PROCEDURE: INPATIENT DISCHARGE PROCESS AND CARE TRANSITIONS",
-            styles["title"],
-        )
-    )
-    story.append(
-        Paragraph(
-            "<b>Document ID:</b> SOP-DIS-2026-02 | <b>Effective Date:</b> 2026-01-01 | <b>Department:</b> Care Coordination & Inpatient Medicine",
-            styles["body"],
-        )
-    )
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=1.5,
-            color=colors.HexColor("#2B6CB0"),
-            spaceBefore=4,
-            spaceAfter=10,
-        )
-    )
-
-    story.append(Paragraph("1.0 Objective and Target Timelines", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Safe, timely discharge planning begins on admission. The goal of this protocol is to reduce "
-            "preventable 30-day hospital readmissions, eliminate post-discharge adverse drug events, and "
-            "ensure smooth coordination between hospital teams, post-acute facilities, and primary care physicians.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("2.0 Clinical Sign-off and Summary Requirements", styles["h1"]))
-    story.append(
-        Paragraph(
-            "The attending physician must complete and digitally sign the formal discharge summary within "
-            "<b>24 hours</b> of patient departure. For patients transferring to skilled nursing facilities (SNF) "
-            "or acute rehab, the preliminary discharge order, medication list, and transfer packet must be "
-            "finalized prior to physical departure from the unit.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("3.0 Medication Reconciliation Protocol", styles["h1"]))
-    story.append(
-        Paragraph(
-            "A clinical pharmacist or dedicated discharge nurse must perform three-way medication reconciliation: "
-            "comparing pre-admission medications, active inpatient medications, and intended outpatient prescriptions. "
-            "Every prescribed medication must have an explicitly documented indication, dosage, dosage unit, "
-            "administration frequency, and intended treatment duration. Verbal instructions alone are prohibited.",
-            styles["body"],
-        )
-    )
-
-    story.append(PageBreak())
-
-    # Page 2
-    story.append(Paragraph("4.0 Staged Discharge Workflow and Responsibilities", styles["h1"]))
-    story.append(
-        Paragraph(
-            "To achieve the target hospital departure cutoff of 11:00 AM, clinical teams must adhere to the "
-            "phased milestones detailed below.",
-            styles["body"],
-        )
-    )
-
-    table_data = [
-        [
-            Paragraph("Workflow Stage", styles["table_header"]),
-            Paragraph("Target Milestone", styles["table_header"]),
-            Paragraph("Lead Role", styles["table_header"]),
-            Paragraph("Mandatory Deliverables", styles["table_header"]),
-        ],
-        [
-            Paragraph("<b>Pre-Discharge T-24h</b>", styles["table_cell"]),
-            Paragraph("Day prior by 16:00", styles["table_cell"]),
-            Paragraph("Attending / Resident", styles["table_cell"]),
-            Paragraph("Identify anticipated discharge; draft medication list; verify ride home", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Morning Review T-4h</b>", styles["table_cell"]),
-            Paragraph("Day of discharge 07:30", styles["table_cell"]),
-            Paragraph("Care Coordinator", styles["table_cell"]),
-            Paragraph("Confirm DME delivery; finalize insurance approval; verify rehab bed", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Medication Finalization</b>", styles["table_cell"]),
-            Paragraph("Day of discharge 09:00", styles["table_cell"]),
-            Paragraph("Clinical Pharmacist", styles["table_cell"]),
-            Paragraph("Resolve drug discrepancies; complete bedside 'Meds-to-Beds' delivery", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Patient Education</b>", styles["table_cell"]),
-            Paragraph("Day of discharge 10:00", styles["table_cell"]),
-            Paragraph("Primary Nurse", styles["table_cell"]),
-            Paragraph("Teach-back technique for 'Red Flag' symptoms; review follow-up schedule", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Departure & Transport</b>", styles["table_cell"]),
-            Paragraph("Day of discharge 11:00", styles["table_cell"]),
-            Paragraph("Unit Charge Nurse", styles["table_cell"]),
-            Paragraph("Wheelchair escort to exit; update bed tracking system to dirty/cleaning", styles["table_cell"]),
-        ],
-    ]
-
-    t = Table(table_data, colWidths=[90, 80, 95, 185])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("5.0 Post-Discharge Follow-Up and Escalation Criteria", styles["h1"]))
-    story.append(
-        Paragraph(
-            "High-risk patients (LACE score ≥ 10 or multi-morbid conditions) must receive a telephone follow-up "
-            "call from the care transition team within <b>48 to 72 hours</b> post-discharge. The call must assess: "
-            "(1) medication understanding and pharmacy pickup, (2) red flag warning signs (chest pain, worsening dyspnea, "
-            "fever > 38.3°C, sudden wound drainage), (3) confirmed appointment with outpatient provider within 7 days. "
-            "Any unresolved critical symptoms require immediate triage to the urgent care clinic or emergency department.",
-            styles["body"],
-        )
-    )
-
-    doc.build(story, canvasmaker=NumberedCanvas)
+    generate_sop_from_spec(SOP_DEFINITIONS["discharge_process"], output_path)
 
 
 def generate_sop_billing_financial(output_path: Path) -> None:
-    """Generate multi-page SOP for Hospital Billing, Authorization, and Disputes."""
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-    )
-    styles = get_document_styles()
-    story: List[Any] = []
-
-    story.append(
-        Paragraph("METROPOLITAN HEALTH SYSTEM — ADMINISTRATIVE POLICY", styles["subtitle"])
-    )
-    story.append(
-        Paragraph(
-            "STANDARD OPERATING PROCEDURE: PATIENT FINANCIAL CLEARANCE, BILLING, AND DISPUTE RESOLUTION",
-            styles["title"],
-        )
-    )
-    story.append(
-        Paragraph(
-            "<b>Document ID:</b> SOP-BIL-2026-03 | <b>Effective Date:</b> 2026-01-01 | <b>Department:</b> Revenue Cycle & Patient Access",
-            styles["body"],
-        )
-    )
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=1.5,
-            color=colors.HexColor("#2B6CB0"),
-            spaceBefore=4,
-            spaceAfter=10,
-        )
-    )
-
-    story.append(Paragraph("1.0 Policy Purpose and Financial Ethics", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Metropolitan Health System is committed to transparent, accurate, and fair medical billing practices. "
-            "This procedure outlines pre-service financial clearance, insurance authorization requirements, patient "
-            "cost estimation under the No Surprises Act, and formal pathways for disputed charges.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("2.0 Pre-Service Authorization Timelines", styles["h1"]))
-    story.append(
-        Paragraph(
-            "For elective inpatient admissions and non-emergent surgical interventions, commercial and governmental "
-            "payer pre-authorizations must be secured no later than <b>72 hours prior</b> to scheduled admission. "
-            "Emergency admissions bypass pre-authorization, but patient access staff must submit an urgent clinical "
-            "admission notification to the payer within <b>24 hours</b> of bed placement.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("3.0 Good Faith Estimates (GFE)", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Uninsured and self-pay patients must be provided with a Good Faith Estimate within 1 business day of "
-            "scheduling if the service is at least 3 business days out, or within 3 business days if scheduled at "
-            "least 10 business days in advance. Discrepancies exceeding $400 entitle patients to external arbitration.",
-            styles["body"],
-        )
-    )
-
-    story.append(PageBreak())
-
-    # Page 2
-    story.append(Paragraph("4.0 Billing Service Categories and Dispute Windows", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Standard hospital billing rates, pre-authorization criteria, and patient appeal windows are structured "
-            "by service class as shown in the schedule below.",
-            styles["body"],
-        )
-    )
-
-    table_data = [
-        [
-            Paragraph("Service Code / Tier", styles["table_header"]),
-            Paragraph("Category Description", styles["table_header"]),
-            Paragraph("Payer Pre-Auth Window", styles["table_header"]),
-            Paragraph("Patient Appeal Window", styles["table_header"]),
-            Paragraph("Escalation Authority", styles["table_header"]),
-        ],
-        [
-            Paragraph("<b>INP-EMERG-01</b>", styles["table_cell"]),
-            Paragraph("Emergency Inpatient Admission", styles["table_cell"]),
-            Paragraph("Within 24 hrs post-bed placement", styles["table_cell"]),
-            Paragraph("60 days from final bill date", styles["table_cell"]),
-            Paragraph("Utilization Review Director", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>INP-ELECT-02</b>", styles["table_cell"]),
-            Paragraph("Elective Inpatient Surgery", styles["table_cell"]),
-            Paragraph("Minimum 72 hrs pre-op", styles["table_cell"]),
-            Paragraph("45 days from statement date", styles["table_cell"]),
-            Paragraph("Revenue Cycle Manager", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>OUT-DIAG-03</b>", styles["table_cell"]),
-            Paragraph("Advanced Imaging (CT, MRI, PET)", styles["table_cell"]),
-            Paragraph("48 hrs prior to imaging scan", styles["table_cell"]),
-            Paragraph("30 days from billing statement", styles["table_cell"]),
-            Paragraph("Patient Accounts Supervisor", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>ICU-CRIT-04</b>", styles["table_cell"]),
-            Paragraph("Critical Care & ECMO Services", styles["table_cell"]),
-            Paragraph("Daily concurrent clinical review", styles["table_cell"]),
-            Paragraph("90 days from statement date", styles["table_cell"]),
-            Paragraph("Chief Financial Officer", styles["table_cell"]),
-        ],
-    ]
-
-    t = Table(table_data, colWidths=[90, 110, 100, 85, 95])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("5.0 Dispute Resolution and Financial Hardship Policy", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Patients contesting line-item charges or billing calculations must submit an itemized dispute form. "
-            "Billing holds are placed immediately upon receipt of a dispute, suspending all collection activity. "
-            "The Billing Resolution Committee must issue a formal determination within <b>30 calendar days</b>. "
-            "Patients whose household income falls below 250% of the Federal Poverty Level (FPL) are eligible for "
-            "100% charity care write-offs under the Hospital Financial Assistance Program.",
-            styles["body"],
-        )
-    )
-
-    doc.build(story, canvasmaker=NumberedCanvas)
+    """Generate multi-page SOP for Hospital Billing Compliance and Charge Capture."""
+    generate_sop_from_spec(SOP_DEFINITIONS["billing_financial"], output_path)
 
 
 def generate_sop_medication_safety(output_path: Path) -> None:
-    """Generate multi-page SOP for High-Alert Medication Safety and Administration."""
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-    )
-    styles = get_document_styles()
-    story: List[Any] = []
-
-    story.append(
-        Paragraph("METROPOLITAN HEALTH SYSTEM — CLINICAL PHARMACY POLICY", styles["subtitle"])
-    )
-    story.append(
-        Paragraph(
-            "STANDARD OPERATING PROCEDURE: HIGH-ALERT MEDICATION SAFETY AND INFUSION CONTROLS",
-            styles["title"],
-        )
-    )
-    story.append(
-        Paragraph(
-            "<b>Document ID:</b> SOP-MED-2026-04 | <b>Effective Date:</b> 2026-01-01 | <b>Department:</b> Pharmacy & Therapeutics Committee",
-            styles["body"],
-        )
-    )
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=1.5,
-            color=colors.HexColor("#2B6CB0"),
-            spaceBefore=4,
-            spaceAfter=10,
-        )
-    )
-
-    story.append(Paragraph("1.0 Safety Mandate & High-Alert Classification", styles["h1"]))
-    story.append(
-        Paragraph(
-            "High-alert medications bear a heightened risk of causing significant patient harm when used in error. "
-            "Although errors may not occur more frequently with these drugs, the clinical consequences are catastrophic. "
-            "This protocol enforces strict prescribing safeguards, smart infusion pump guardrails, and independent "
-            "double-checks for all designated high-alert pharmaceuticals.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("2.0 Five Rights and Independent Double-Check Protocol", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Prior to administering any high-alert medication, two licensed nurses must independently verify: "
-            "(1) the right patient using two unique identifiers, (2) right medication, (3) right dose and concentration, "
-            "(4) right route, and (5) right time and infusion rate. The double-check must be documented in the electronic "
-            "medication administration record (eMAR) with dual clinician signatures.",
-            styles["body"],
-        )
-    )
-
-    story.append(Paragraph("3.0 Look-Alike / Sound-Alike (LASA) and Tall-Man Lettering", styles["h1"]))
-    story.append(
-        Paragraph(
-            "All pharmacy labels and automated dispensing cabinet (ADC) storage bins must utilize FDA/ISMP "
-            "Tall-Man lettering (e.g., DOBUTamine vs. DOPamine, hydrOXYzine vs. hydrALAZINE). Automated cabinets "
-            "must enforce lock-out barriers for concentrated electrolytes.",
-            styles["body"],
-        )
-    )
-
-    story.append(PageBreak())
-
-    # Page 2
-    story.append(Paragraph("4.0 High-Alert Medication Dosing and Monitoring Guardrails", styles["h1"]))
-    story.append(
-        Paragraph(
-            "The table below specifies mandatory dosing boundaries, maximum infusion rates, and clinical monitoring "
-            "parameters for high-alert drug classes across all inpatient divisions.",
-            styles["body"],
-        )
-    )
-
-    table_data = [
-        [
-            Paragraph("Medication Class", styles["table_header"]),
-            Paragraph("Exemplar Agent", styles["table_header"]),
-            Paragraph("Absolute Dosing Guardrail", styles["table_header"]),
-            Paragraph("Required Clinical Monitoring", styles["table_header"]),
-            Paragraph("Antidote / Reversal Agent", styles["table_header"]),
-        ],
-        [
-            Paragraph("<b>Concentrated Potassium</b>", styles["table_cell"]),
-            Paragraph("Potassium Chloride IV", styles["table_cell"]),
-            Paragraph("Max 40 mEq/L peripheral; NEVER IV push", styles["table_cell"]),
-            Paragraph("Continuous ECG monitoring if >10 mEq/hr; serum K+ q4h", styles["table_cell"]),
-            Paragraph("Calcium gluconate, Insulin + D50W", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Intravenous Anticoagulants</b>", styles["table_cell"]),
-            Paragraph("Heparin Sodium Continuous IV", styles["table_cell"]),
-            Paragraph("Initial bolus 80 units/kg; max 20,000 U/day", styles["table_cell"]),
-            Paragraph("anti-Xa or aPTT every 6 hours; daily platelet count", styles["table_cell"]),
-            Paragraph("Protamine Sulfate (1 mg per 100 U heparin)", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Intravenous Regular Insulin</b>", styles["table_cell"]),
-            Paragraph("Regular Insulin IV Infusion", styles["table_cell"]),
-            Paragraph("Max titration 0.1 units/kg/hr without MD order", styles["table_cell"]),
-            Paragraph("Point-of-care blood glucose hourly until stable 4 hrs", styles["table_cell"]),
-            Paragraph("Dextrose 50% IV injection (25 g)", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Intravenous Opioids</b>", styles["table_cell"]),
-            Paragraph("Morphine / Hydromorphone PCA", styles["table_cell"]),
-            Paragraph("Basal infusion restricted; lockout min 6 min", styles["table_cell"]),
-            Paragraph("Continuous SpO2 and capnography; RASS score q2h", styles["table_cell"]),
-            Paragraph("Naloxone 0.04-0.4 mg IV titration", styles["table_cell"]),
-        ],
-    ]
-
-    t = Table(table_data, colWidths=[90, 85, 110, 115, 80])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("5.0 Adverse Drug Event (ADE) Reporting and Root Cause Analysis", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Any medication incident resulting in patient harm or categorized as a 'near-miss' involving high-alert "
-            "medications must be logged in the Safety Incident Management System within <b>2 hours</b>. The clinical "
-            "pharmacy director initiates a multi-disciplinary root cause analysis (RCA) within 5 business days to determine "
-            "systemic vulnerabilities and implement error-proofing constraints.",
-            styles["body"],
-        )
-    )
-
-    doc.build(story, canvasmaker=NumberedCanvas)
+    """Generate multi-page SOP for High-Alert Medication Safety and Infusion Controls."""
+    generate_sop_from_spec(SOP_DEFINITIONS["medication_safety"], output_path)
 
 
 def generate_sop_patient_consent(output_path: Path) -> None:
     """Generate multi-page SOP for Informed Consent for Clinical Procedures."""
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-    )
-    styles = get_document_styles()
-    story: List[Any] = []
+    generate_sop_from_spec(SOP_DEFINITIONS["patient_consent"], output_path)
 
-    story.append(
-        Paragraph("METROPOLITAN HEALTH SYSTEM — CLINICAL GOVERNANCE", styles["subtitle"])
-    )
-    story.append(
-        Paragraph(
-            "STANDARD OPERATING PROCEDURE: INFORMED CONSENT FOR CLINICAL PROCEDURES AND RESEARCH",
-            styles["title"],
-        )
-    )
-    story.append(
-        Paragraph(
-            "<b>Document ID:</b> SOP-CON-2026-05 | <b>Effective Date:</b> 2026-01-01 | <b>Department:</b> Medical Staff Affairs & Legal Counsel",
-            styles["body"],
-        )
-    )
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=1.5,
-            color=colors.HexColor("#2B6CB0"),
-            spaceBefore=4,
-            spaceAfter=10,
-        )
-    )
 
-    story.append(Paragraph("1.0 Fundamental Legal & Ethical Principles", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Every adult patient with decision-making capacity possesses the fundamental moral and legal right to "
-            "determine what medical interventions are performed upon their body. Informed consent is a shared clinical "
-            "dialogue, not merely the signing of a form. Clinicians must explain the nature of the condition, proposed "
-            "procedure, material risks, potential benefits, and reasonable alternatives, including no intervention.",
-            styles["body"],
-        )
-    )
+def generate_sop_hand_hygiene(output_path: Path) -> None:
+    """Generate multi-page SOP for Hand Hygiene Protocols and Sanitization Benchmarks."""
+    generate_sop_from_spec(SOP_DEFINITIONS["hand_hygiene"], output_path)
 
-    story.append(Paragraph("2.0 Clinician Responsibility & Prohibition of Delegation", styles["h1"]))
-    story.append(
-        Paragraph(
-            "The practitioner who will perform the procedure is legally responsible for discussing and obtaining "
-            "informed consent. This duty <b>may not be delegated</b> to registered nurses, medical assistants, or unit clerks. "
-            "A registered nurse may only witness the patient's signature confirming identity and voluntary signing.",
-            styles["body"],
-        )
-    )
 
-    story.append(Paragraph("3.0 Decision-Making Capacity and Surrogate Decision-Makers", styles["h1"]))
-    story.append(
-        Paragraph(
-            "In patients lacking decision-making capacity due to delirium, coma, or dementia, consent must be obtained "
-            "from the legal healthcare surrogate in following hierarchical sequence: (1) designated healthcare proxy / "
-            "Durable Power of Attorney for Healthcare, (2) court-appointed guardian, (3) spouse, (4) adult children, "
-            "(5) parents, and (6) adult siblings.",
-            styles["body"],
-        )
-    )
+def generate_sop_fall_prevention(output_path: Path) -> None:
+    """Generate multi-page SOP for Inpatient Fall Risk Assessment and Post-Fall Protocol."""
+    generate_sop_from_spec(SOP_DEFINITIONS["fall_prevention"], output_path)
 
-    story.append(PageBreak())
 
-    # Page 2
-    story.append(Paragraph("4.0 Procedure Risk Classification and Consent Documentation", styles["h1"]))
-    story.append(
-        Paragraph(
-            "The table below details consent tiers, mandatory provider credentials, documentation requirements, "
-            "and validity expiration periods across clinical services.",
-            styles["body"],
-        )
-    )
+def generate_sop_blood_transfusion(output_path: Path) -> None:
+    """Generate multi-page SOP for Blood Component Transfusion and Adverse Reaction Management."""
+    generate_sop_from_spec(SOP_DEFINITIONS["blood_transfusion"], output_path)
 
-    table_data = [
-        [
-            Paragraph("Procedure Risk Tier", styles["table_header"]),
-            Paragraph("Exemplar Procedures", styles["table_header"]),
-            Paragraph("Authorized Provider", styles["table_header"]),
-            Paragraph("Required Form & Signatures", styles["table_header"]),
-            Paragraph("Validity Window", styles["table_header"]),
-        ],
-        [
-            Paragraph("<b>Tier 1: Non-Invasive</b>", styles["table_cell"]),
-            Paragraph("Phlebotomy, standard X-ray, ECG, wound dressing", styles["table_cell"]),
-            Paragraph("Treating physician or licensed staff nurse", styles["table_cell"]),
-            Paragraph("General admission agreement; verbal assent in chart", styles["table_cell"]),
-            Paragraph("Duration of inpatient stay", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Tier 2: Minor Invasive</b>", styles["table_cell"]),
-            Paragraph("Lumbar puncture, paracentesis, central venous line", styles["table_cell"]),
-            Paragraph("Attending physician, fellow, or credentialed resident", styles["table_cell"]),
-            Paragraph("Specialized Form CON-202 + witness signature", styles["table_cell"]),
-            Paragraph("30 days unless condition changes", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Tier 3: Major Operative</b>", styles["table_cell"]),
-            Paragraph("General anesthesia surgery, cardiac catheterization", styles["table_cell"]),
-            Paragraph("Operating surgeon / interventional attending only", styles["table_cell"]),
-            Paragraph("Formal Surgical Form CON-301 + patient + surgeon sig", styles["table_cell"]),
-            Paragraph("30 days maximum pre-procedure", styles["table_cell"]),
-        ],
-        [
-            Paragraph("<b>Tier 4: Emergency Exception</b>", styles["table_cell"]),
-            Paragraph("Imminent risk to life, limb, or neurological viability", styles["table_cell"]),
-            Paragraph("Two independent licensed attending physicians", styles["table_cell"]),
-            Paragraph("Emergency Consent Waiver Form CON-911 in chart", styles["table_cell"]),
-            Paragraph("Single emergent episode only", styles["table_cell"]),
-        ],
-    ]
 
-    t = Table(table_data, colWidths=[90, 110, 100, 100, 80])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2B6CB0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F7FAFC"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-    story.append(t)
-    story.append(Spacer(1, 10))
+def generate_sop_emergency_code_response(output_path: Path) -> None:
+    """Generate multi-page SOP for Hospital-Wide Emergency Codes and Resuscitation Protocols."""
+    generate_sop_from_spec(SOP_DEFINITIONS["emergency_code_response"], output_path)
 
-    story.append(Paragraph("5.0 Emergency Doctrine & Right to Revocation", styles["h1"]))
-    story.append(
-        Paragraph(
-            "Under the emergency exception doctrine, life-saving care may proceed when a patient is unconscious "
-            "or incapacitated and immediate family cannot be reached within clinically acceptable response times. "
-            "Two attending physicians must document in the medical record that delay would risk irreversible injury or death. "
-            "Patients retain the absolute right to revoke consent at any time prior to the induction of anesthesia or "
-            "procedure initiation, in which case the procedure must stop immediately unless doing so would cause imminent death.",
-            styles["body"],
-        )
-    )
 
-    doc.build(story, canvasmaker=NumberedCanvas)
+def generate_sop_patient_identification(output_path: Path) -> None:
+    """Generate multi-page SOP for Two-Identifier Patient Identification and Wristband Standards."""
+    generate_sop_from_spec(SOP_DEFINITIONS["patient_identification"], output_path)
+
+
+def generate_sop_biomedical_waste(output_path: Path) -> None:
+    """Generate multi-page SOP for Biomedical and Hazardous Waste Segregation and Disposal."""
+    generate_sop_from_spec(SOP_DEFINITIONS["biomedical_waste"], output_path)
+
+
+def generate_sop_pharmacy_storage(output_path: Path) -> None:
+    """Generate multi-page SOP for Pharmaceutical Cold Chain Management and Inventory Storage."""
+    generate_sop_from_spec(SOP_DEFINITIONS["pharmacy_storage"], output_path)
+
+
+def generate_sop_questions_file(eval_dir: Path) -> Path:
+    """Generate evaluation question set for all 12 SOPs in data/eval/sop_questions.json."""
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    target_path = eval_dir / "sop_questions.json"
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(SOP_QUESTIONS, f, indent=2)
+    return target_path
 
 
 # ============================================================================
@@ -1503,32 +882,52 @@ def get_synthetic_reports_dataset() -> List[Dict[str, Any]]:
     return reports
 
 
-def generate_all_synthetic_data(output_dir: Path) -> Dict[str, Any]:
+def generate_all_synthetic_data(
+    output_dir: Path,
+    eval_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Generate all synthetic SOPs and clinical reports (PDF + ground-truth JSON)."""
     output_dir.mkdir(parents=True, exist_ok=True)
+    if eval_dir is None:
+        eval_dir = output_dir.parent / "eval"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
     generated_summary: Dict[str, Any] = {
         "sops": [],
         "reports": [],
         "ground_truth_json": [],
+        "sop_questions": None,
     }
 
-    # 1. Generate 5 SOPs
+    # 1. Generate 12 SOPs
     sops = [
         ("sop_infection_control.pdf", generate_sop_infection_control),
         ("sop_discharge_process.pdf", generate_sop_discharge_process),
         ("sop_billing_financial.pdf", generate_sop_billing_financial),
         ("sop_medication_safety.pdf", generate_sop_medication_safety),
         ("sop_patient_consent.pdf", generate_sop_patient_consent),
+        ("sop_hand_hygiene.pdf", generate_sop_hand_hygiene),
+        ("sop_fall_prevention.pdf", generate_sop_fall_prevention),
+        ("sop_blood_transfusion.pdf", generate_sop_blood_transfusion),
+        ("sop_emergency_code_response.pdf", generate_sop_emergency_code_response),
+        ("sop_patient_identification.pdf", generate_sop_patient_identification),
+        ("sop_biomedical_waste.pdf", generate_sop_biomedical_waste),
+        ("sop_pharmacy_storage.pdf", generate_sop_pharmacy_storage),
     ]
 
-    print(f"Generating 5 Standard Operating Procedures in {output_dir}...")
+    print(f"Generating 12 Standard Operating Procedures in {output_dir}...")
     for filename, generator_func in sops:
         pdf_path = output_dir / filename
         generator_func(pdf_path)
         generated_summary["sops"].append(str(pdf_path))
         print(f"  [+] Created SOP: {filename}")
 
-    # 2. Generate Clinical Reports & Ground-Truth JSONs
+    # 2. Generate Evaluation Questions File
+    questions_path = generate_sop_questions_file(eval_dir)
+    generated_summary["sop_questions"] = str(questions_path)
+    print(f"  [+] Created SOP Evaluation Questions: {questions_path}")
+
+    # 3. Generate Clinical Reports & Ground-Truth JSONs
     reports = get_synthetic_reports_dataset()
     print(f"Generating {len(reports)} Clinical Reports & Ground-Truth JSONs in {output_dir}...")
 
@@ -1580,7 +979,7 @@ def generate_all_synthetic_data(output_dir: Path) -> Dict[str, Any]:
         print(f"  [+] Created Report & JSON: {stem}.pdf / .json{status_suffix}")
 
     total_pdfs = len(generated_summary["sops"]) + len(generated_summary["reports"])
-    print(f"\n[DONE] Successfully generated {total_pdfs} PDFs and {len(generated_summary['ground_truth_json'])} ground-truth JSON files.")
+    print(f"\n[DONE] Successfully generated {total_pdfs} PDFs, {len(generated_summary['ground_truth_json'])} ground-truth JSON files, and 1 SOP evaluation dataset.")
     return generated_summary
 
 
@@ -1593,8 +992,14 @@ def main() -> None:
         default=Path(__file__).resolve().parent / "generated",
         help="Target directory to write PDFs and JSONs (default: data/generated)",
     )
+    parser.add_argument(
+        "--eval-dir",
+        type=Path,
+        default=Path(__file__).resolve().parent / "eval",
+        help="Target directory to write evaluation question sets (default: data/eval)",
+    )
     args = parser.parse_args()
-    generate_all_synthetic_data(args.output_dir)
+    generate_all_synthetic_data(output_dir=args.output_dir, eval_dir=args.eval_dir)
 
 
 if __name__ == "__main__":

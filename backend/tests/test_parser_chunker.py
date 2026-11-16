@@ -11,9 +11,9 @@ def test_pypdf_parsing():
     assert pdf_path.exists(), "Sample SOP PDF should exist"
 
     doc = parse_pdf_pypdf(pdf_path, filename=pdf_path.name)
-    assert doc.page_count == 2
-    assert len(doc.items) >= 2
-    assert all(item.page_no in (1, 2) for item in doc.items)
+    assert 6 <= doc.page_count <= 10
+    assert len(doc.items) >= 6
+    assert all(1 <= item.page_no <= doc.page_count for item in doc.items)
 
 
 def test_chunker_parent_and_child_generation():

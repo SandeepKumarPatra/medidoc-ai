@@ -37,3 +37,17 @@ This document tracks key architectural decisions, rationale, and documented trad
   - **Hierarchical Parent-Child Architecture:** Fine child chunks (~300 tokens) maximize dense semantic retrieval precision and keyword match accuracy, while linking to coarse parent sections (<= 1500 tokens) ensures LLM synthesis in Phase 2 receives coherent clinical section context without fragmentation.
   - **Dual-Indexing in PostgreSQL:** Pairing pgvector HNSW cosine indexing with a GIN index over `to_tsvector('english', text)` provides native hybrid search without external vector DB dependencies, directly enabling reciprocal rank fusion.
   - **Strict Page Provenance Tracking:** Maintaining explicit `page_start` and `page_end` integers across all chunk levels guarantees verifiable citation generation (`[document, pages]`) required for clinical compliance.
+
+---
+
+## Decision 003: Phase 1b SOP Corpus Expansion and Evaluation Dataset
+
+- **What was built:**
+  - Expanded the SOP library in `data/generate_synthetic.py` and `data/sop_data.py` to 12 multi-page policies (7 pages each, 14 sections, tabular data, concrete facts and roles).
+  - Authored `data/eval/sop_questions.json` with 48 natural-language questions (4 per SOP) mapped to target files, exact headings, and verbatim snippets.
+  - Updated verification tests in `backend/tests/test_generate_synthetic.py`, `test_parser_chunker.py`, and `test_ingestion.py` for 12 documents and 6–10 page boundaries.
+
+- **Why the corpus was enlarged:**
+  - **Authentic Policy Corpus Scale:** Enlarged from 5 short documents to 12 realistic 7-page SOPs to create sufficient chunk volume and diversity for evaluating hierarchical parent-child retrieval in Phase 2.
+  - **Non-Trivial Disambiguation via Thematic Overlaps:** Intentionally introduced cross-cutting themes (glove specifications, EMR documentation timelines, and emergency escalation paths) across documents so retrieval requires contextual semantic disambiguation rather than simple keyword matching.
+  - **Section-Level Ground-Truth Benchmark:** Created 48 curated questions paired with exact section titles and answer snippets to quantitatively benchmark retrieval recall (hit@5) and MRR without heading-word leakage.
