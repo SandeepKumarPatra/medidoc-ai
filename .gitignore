@@ -1,0 +1,60 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Synthetic data artifacts
+data/generated/
+data/generated/*
+
+# Dependencies
+node_modules/
+backend/.venv/
+.venv/
+venv/
+ENV/
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Frontend build
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

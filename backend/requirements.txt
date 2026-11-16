@@ -1,0 +1,30 @@
+# Core API framework
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+pydantic-settings==2.16.3
+
+# Database & Vector Store
+sqlalchemy==2.1.8
+psycopg[binary]==3.3.9
+pgvector==0.5.1
+
+# LangChain Ecosystem
+langchain==1.5.0
+langchain-core==1.8.1
+langchain-community==0.4.2
+langchain-google-genai==4.5.0
+langchain-openai==1.8.0
+
+# Document Ingestion & Embeddings
+docling==2.150.1
+pypdf==7.0.1
+sentence-transformers==6.3.0
+
+# Synthetic Data Generation
+reportlab==5.1.0
+
+# Utilities & Testing
+python-dotenv==1.2.4
+httpx==0.28.1
+pytest==9.2.0
