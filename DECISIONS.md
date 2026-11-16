@@ -21,3 +21,19 @@ This document tracks key architectural decisions, rationale, and documented trad
 
 - **Documented Known Limitations & Trade-Offs:**
   - **PII Masking Boundary:** Labelled-field and regex patterns effectively redact identifiers (MRN, phone numbers, email addresses, explicit patient name blocks). However, unlabelled proper names embedded within free-form clinical narrative prose can occasionally be missed by regex; Phase 3 will document this limitation and provide fallback redaction heuristics.
+
+---
+
+## Decision 002: Phase 1 Database Schema, Hierarchical Chunking, and Ingestion Pipeline
+
+- **What was built:**
+  - SQLAlchemy 2.x declarative models for documents, coarse parents, fine children, extractions, validation issues, audit log (metadata only), and evaluation tables.
+  - Docling layout parser with automated pypdf fallback preserving section headings, markdown tables, and page numbers.
+  - Hierarchical chunker creating parent sections (<= ~1500 tokens) and sentence-aligned child chunks (~300 tokens, 50-token overlap).
+  - Dense embedding generator with LangChain HuggingFaceEmbeddings (`BAAI/bge-small-en-v1.5`, 384 dim) and PostgreSQL full-text `to_tsvector('english', text)` population.
+  - FastAPI endpoints for `GET /health` (with live DB probe), `POST /ingest` (multi-part PDF upload), and `GET /documents` (with chunk counts and CORS for `http://localhost:5173`).
+
+- **Why this chunking and storage design:**
+  - **Hierarchical Parent-Child Architecture:** Fine child chunks (~300 tokens) maximize dense semantic retrieval precision and keyword match accuracy, while linking to coarse parent sections (<= 1500 tokens) ensures LLM synthesis in Phase 2 receives coherent clinical section context without fragmentation.
+  - **Dual-Indexing in PostgreSQL:** Pairing pgvector HNSW cosine indexing with a GIN index over `to_tsvector('english', text)` provides native hybrid search without external vector DB dependencies, directly enabling reciprocal rank fusion.
+  - **Strict Page Provenance Tracking:** Maintaining explicit `page_start` and `page_end` integers across all chunk levels guarantees verifiable citation generation (`[document, pages]`) required for clinical compliance.
