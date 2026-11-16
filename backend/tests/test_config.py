@@ -12,6 +12,9 @@ def test_settings_defaults():
     assert settings.parent_chunk_size == 1500
     assert settings.child_chunk_size == 300
     assert settings.child_chunk_overlap == 50
+    assert settings.rerank_candidates == 10
+    assert settings.reranker_model == "BAAI/bge-reranker-base"
+    assert settings.llm_timeout == 30.0
     assert "http://localhost:5173" in settings.cors_origins
 
 

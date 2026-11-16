@@ -51,3 +51,34 @@ This document tracks key architectural decisions, rationale, and documented trad
   - **Authentic Policy Corpus Scale:** Enlarged from 5 short documents to 12 realistic 7-page SOPs to create sufficient chunk volume and diversity for evaluating hierarchical parent-child retrieval in Phase 2.
   - **Non-Trivial Disambiguation via Thematic Overlaps:** Intentionally introduced cross-cutting themes (glove specifications, EMR documentation timelines, and emergency escalation paths) across documents so retrieval requires contextual semantic disambiguation rather than simple keyword matching.
   - **Section-Level Ground-Truth Benchmark:** Created 48 curated questions paired with exact section titles and answer snippets to quantitatively benchmark retrieval recall (hit@5) and MRR without heading-word leakage.
+
+---
+
+## Decision 004: Phase 2 Retrieval Modes, Cross-Encoder Reranking, LLM Adapters, and Policy Q&A
+
+- **What was built:**
+  - Added SHA-256 byte hashing, 20 MB size limit, and PDF signature validation to `/ingest` to prevent duplicate chunk indexing and invalid uploads.
+  - Built unified `retrieve(question, mode, top_k)` supporting 4 modes: naive, parent-child, hybrid (pgvector cosine + tsvector rank with RRF k=60), and hybrid_rerank (`BAAI/bge-reranker-base` CrossEncoder with parent section deduplication).
+  - Implemented LLM adapter architecture with `GeminiLLMAdapter` (`ChatGoogleGenerativeAI`) and an `OpenAILLMAdapter` stub, switchable via `LLM_PROVIDER`.
+  - Implemented `POST /ask` with grounded prompt template `rag-clinical-v1.0`, `[document, pages]` citations, out-of-context refusal, and per-stage latency tracking.
+
+- **Why this design:**
+  - **Two-Tier Hierarchical Expansion:** Retrieval queries granular child chunks (~300 tokens) for high semantic and lexical recall, but expands to coarse parent sections (<= 1500 tokens) to supply complete clinical policy context to the LLM without paragraph truncation.
+  - **RRF (k=60) Hybrid Fusion:** Merging pgvector dense cosine ranking with PostgreSQL full-text `plainto_tsquery` via Reciprocal Rank Fusion overcomes vocabulary mismatch without external vector database dependencies.
+  - **Deep Cross-Encoder Reranking:** Re-evaluating top hybrid candidates with a cross-attention transformer computes query-passage cross-attention, surfacing highly specific policy clauses that dense embeddings alone miss.
+
+---
+
+## Decision 005: Phase 2b Distinct Parent Deduplication, Reranker Speedup, and Debug Prompt Visibility
+
+- **What was built:**
+  - Enforced strict parent deduplication across `parent_child`, `hybrid`, and `hybrid_rerank` by grouping candidates by `parent_id`, preserving each parent's best-scoring child, and guaranteeing top_k distinct parent sources in `/ask`.
+  - Accelerated reranking to under 2 seconds on CPU by restricting inference to top `RERANK_CANDIDATES` (config default 20) child passages, running under `torch.no_grad()`, batching, and warming up embedding and cross-encoder models during application startup.
+  - Hidden the raw LLM prompt in `/ask` responses by default (returning it only when `debug=true`) to reduce payload overhead while persistently returning `prompt_version`.
+
+---
+
+## Decision 006: Phase 2c Ingestion De-duplication, Replacement Lifecycle, Reranker Sizing, and LLM Timeout Controls
+
+- **What was built:** Added document replacement semantics on filename re-upload (deleting old child/parent records first) and defensive parent de-duplication via normalized text MD5 hashing. Lowered `RERANK_CANDIDATES` default to 10 with configurable choices, and instrumented `POST /ask` with model name/generation latency logging alongside a 30s LLM execution timeout.
+- **Why this design:** Replacing obsolete document chunks during re-upload eliminates stale cross-document section duplication while normalized text hashing shields against parsing repetitions; trimming rerank candidates to 10 cuts CPU latency by ~41% (to ~3.9s) while bounded LLM timeouts prevent indefinite client thread blocking.

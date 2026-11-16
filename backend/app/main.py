@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import List, Literal
+from typing import Any, List, Literal, Optional
 
+import torch
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,7 +23,11 @@ from backend.app.config import get_settings
 from backend.app.db.init_db import init_db
 from backend.app.db.models import Child, Document, Parent
 from backend.app.db.session import get_db
+from backend.app.ingestion.embedder import get_embedder
 from backend.app.ingestion.service import ingest_document
+from backend.app.retrieval.qa import answer_question
+from backend.app.retrieval.rerank import get_cross_encoder
+from backend.app.retrieval.service import retrieve
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -54,6 +59,46 @@ class IngestResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AskRequest(BaseModel):
+    """Question answering query request schema."""
+
+    question: str = Field(..., min_length=1, description="Question regarding hospital policies or SOPs")
+    mode: Literal["naive", "parent_child", "hybrid", "hybrid_rerank"] = Field(
+        default="hybrid_rerank",
+        description="Retrieval strategy: naive, parent_child, hybrid, or hybrid_rerank",
+    )
+    top_k: int = Field(default=5, ge=1, le=20, description="Number of results to retrieve")
+    debug: bool = Field(
+        default=False,
+        description="When true, returns the full synthesized prompt text sent to the LLM",
+    )
+
+
+class SourceItem(BaseModel):
+    """Provenance citation for an individual retrieved passage."""
+
+    document: str = Field(..., description="Document filename")
+    pages: str = Field(..., description="Page label (e.g. 'p. 2' or 'pp. 2-3')")
+    citation: str = Field(..., description="Citation string: [document, pages]")
+    section_title: str | None = Field(None, description="Section heading")
+    score: float = Field(..., description="Relevance score from retrieval")
+    parent_id: str | None = Field(None, description="Parent section UUID for parent-expanded modes")
+
+
+class AskResponse(BaseModel):
+    """Question answering response schema."""
+
+    answer: str = Field(..., description="Synthesized clinical policy answer")
+    sources: List[SourceItem] = Field(..., description="Cited source documents and pages")
+    retrieved_ids: List[str] = Field(..., description="Retrieved chunk or section IDs")
+    timings: dict[str, Any] = Field(..., description="Per-stage latency breakdown and model metadata")
+    prompt: Optional[str] = Field(
+        default=None,
+        description="Full prompt text sent to the LLM (only present when debug=true)",
+    )
+    prompt_version: str = Field(..., description="Version tag of the prompt template")
+
+
 class DocumentItem(BaseModel):
     """Summary of an indexed document with chunk statistics."""
 
@@ -80,6 +125,19 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables and pgvector extension ready.")
     except Exception as exc:
         logger.warning("Could not auto-initialize DB on startup (%s); will retry on request.", exc)
+
+    # Warm up embedding model and reranker once at API startup
+    try:
+        logger.info("Warming up embedding model and cross-encoder reranker...")
+        embedder = get_embedder()
+        embedder.embed_query("warmup query")
+        reranker = get_cross_encoder()
+        with torch.no_grad():
+            reranker.predict([["warmup query", "warmup passage"]], batch_size=1, show_progress_bar=False)
+        logger.info("Embedding and reranker models warmed up successfully.")
+    except Exception as exc:
+        logger.warning("Could not warm up models on startup: %s", exc)
+
     yield
     logger.info("Shutting down MediDoc AI API server...")
 
@@ -150,6 +208,8 @@ async def ingest_pdf(
     db: Session = Depends(get_db),
 ) -> IngestResponse:
     """Upload, parse, chunk, embed, and index a PDF document into pgvector and full-text search."""
+    MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB
+
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -163,12 +223,29 @@ async def ingest_pdf(
             detail="The uploaded PDF file is empty.",
         )
 
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum limit of 20 MB (received {len(content)} bytes).",
+        )
+
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Uploaded file content does not have a valid PDF signature.",
+        )
+
     try:
         result = ingest_document(
             db=db,
             source=content,
             filename=file.filename,
             doc_type=doc_type.lower(),
+        )
+        message = (
+            "Document already ingested (duplicate detected by file hash)"
+            if getattr(result, "is_duplicate", False)
+            else "Document successfully ingested and indexed"
         )
         return IngestResponse(
             document_id=str(result.document_id),
@@ -178,6 +255,7 @@ async def ingest_pdf(
             page_count=result.page_count,
             parent_chunks=result.parent_chunks,
             child_chunks=result.child_chunks,
+            message=message,
         )
     except Exception as exc:
         logger.error("Failed to ingest document %s: %s", file.filename, exc)
@@ -234,3 +312,71 @@ def list_documents(db: Session = Depends(get_db)) -> List[DocumentItem]:
         )
 
     return results
+
+
+@app.post(
+    "/ask",
+    response_model=AskResponse,
+    response_model_exclude_none=True,
+    summary="Answer a clinical or policy question using RAG with source citations",
+    tags=["Retrieval & QA"],
+)
+def ask_question_endpoint(
+    request: AskRequest,
+    db: Session = Depends(get_db),
+) -> AskResponse:
+    """Retrieve grounded context passages across SOPs and generate a cited clinical policy answer.
+
+    - Supports retrieval modes: naive, parent_child, hybrid, hybrid_rerank
+    - Enforces answers derived solely from retrieved context
+    - Cites sources as [document, pages]
+    - Returns answer, sources, retrieved IDs, stage timings, prompt (only when debug=true), and prompt_version
+    """
+    try:
+        retrieval_res = retrieve(
+            question=request.question,
+            mode=request.mode,
+            top_k=request.top_k,
+            db=db,
+        )
+        answer_res = answer_question(retrieval_response=retrieval_res)
+
+        logger.info(
+            "Completed /ask request (mode=%s): model=%s, generation_ms=%s ms, timings=%s",
+            request.mode,
+            answer_res.timings.get("llm_model"),
+            answer_res.timings.get("generation_ms"),
+            answer_res.timings,
+        )
+
+        return AskResponse(
+            answer=answer_res.answer,
+            sources=[
+                SourceItem(
+                    document=src.document,
+                    pages=src.pages,
+                    citation=src.citation,
+                    section_title=src.section_title,
+                    score=src.score,
+                    parent_id=src.parent_id,
+                )
+                for src in answer_res.sources
+            ],
+            retrieved_ids=answer_res.retrieved_ids,
+            timings=answer_res.timings,
+            prompt=answer_res.prompt if request.debug else None,
+            prompt_version=answer_res.prompt_version,
+        )
+    except TimeoutError as exc:
+        logger.error("LLM timeout processing question '%s': %s", request.question, exc)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"LLM request timed out: {exc}",
+        )
+    except Exception as exc:
+        logger.error("Error processing question '%s': %s", request.question, exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process question: {exc}",
+        )
+

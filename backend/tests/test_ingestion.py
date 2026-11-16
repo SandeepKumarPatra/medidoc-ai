@@ -139,3 +139,152 @@ def test_api_ingest_and_get_documents(client):
     assert matched_doc["parent_count"] > 0
     assert matched_doc["child_count"] > 0
     assert matched_doc["page_count"] >= 1
+
+
+def test_ingest_rejects_non_pdf_and_invalid_signatures(client):
+    """Assert POST /ingest rejects non-pdf file extensions and invalid header signatures."""
+    # 1. Non-pdf extension
+    res_txt = client.post(
+        "/ingest",
+        files={"file": ("notes.txt", b"plain text content", "text/plain")},
+        data={"doc_type": "sop"},
+    )
+    assert res_txt.status_code == 400
+    assert "Invalid file format" in res_txt.json()["detail"]
+
+    # 2. .pdf extension but invalid binary signature (magic bytes)
+    res_fake = client.post(
+        "/ingest",
+        files={"file": ("fake.pdf", b"This is not a pdf file header", "application/pdf")},
+        data={"doc_type": "sop"},
+    )
+    assert res_fake.status_code == 400
+    assert "PDF signature" in res_fake.json()["detail"]
+
+
+def test_ingest_rejects_files_over_20mb(client):
+    """Assert POST /ingest rejects uploads larger than 20 MB."""
+    oversized_bytes = b"%PDF-1.4" + (b"0" * (20 * 1024 * 1024 + 10))
+    response = client.post(
+        "/ingest",
+        files={"file": ("oversized.pdf", oversized_bytes, "application/pdf")},
+        data={"doc_type": "sop"},
+    )
+    assert response.status_code == 400
+    assert "20 MB" in response.json()["detail"]
+
+
+def test_ingest_duplicate_detection_by_hash(client):
+    """Assert uploading the exact same PDF returns the existing document record without re-indexing."""
+    pdf_path = Path("data/generated/sop_discharge_process.pdf")
+    assert pdf_path.exists()
+
+    with open(pdf_path, "rb") as f:
+        file_bytes = f.read()
+
+    # First upload (or re-upload of existing)
+    res1 = client.post(
+        "/ingest",
+        files={"file": (pdf_path.name, file_bytes, "application/pdf")},
+        data={"doc_type": "sop"},
+    )
+    assert res1.status_code == 201
+    data1 = res1.json()
+
+    # Second upload with identical bytes
+    res2 = client.post(
+        "/ingest",
+        files={"file": (pdf_path.name, file_bytes, "application/pdf")},
+        data={"doc_type": "sop"},
+    )
+    assert res2.status_code == 201
+    data2 = res2.json()
+
+    # Document ID and counts must match
+    assert data2["document_id"] == data1["document_id"]
+    assert data2["parent_chunks"] == data1["parent_chunks"]
+    assert data2["child_chunks"] == data1["child_chunks"]
+    assert "duplicate detected by file hash" in data2["message"]
+
+
+def test_ingest_replaces_old_document_on_different_content(db_session):
+    """Assert re-uploading the same filename with different content deletes old parents/children and replaces the document."""
+    pdf_path1 = Path("data/generated/sop_infection_control.pdf")
+    pdf_path2 = Path("data/generated/sop_discharge_process.pdf")
+    assert pdf_path1.exists() and pdf_path2.exists()
+
+    filename = "test_replacement_lifecycle.pdf"
+
+    # Ingest version 1
+    res1 = ingest_document(db=db_session, source=pdf_path1, filename=filename, doc_type="sop")
+    assert res1.status == "completed"
+    doc1_id = res1.document_id
+
+    parents1 = db_session.execute(select(Parent).where(Parent.document_id == doc1_id)).scalars().all()
+    children1 = db_session.execute(select(Child).where(Child.document_id == doc1_id)).scalars().all()
+    assert len(parents1) > 0 and len(children1) > 0
+
+    # Ingest version 2 with different content under the exact same filename
+    res2 = ingest_document(db=db_session, source=pdf_path2, filename=filename, doc_type="sop")
+    assert res2.status == "completed"
+    doc2_id = res2.document_id
+    assert doc2_id != doc1_id
+
+    # Verify old doc1 and its parents/children are deleted
+    assert db_session.get(Document, doc1_id) is None
+    old_p = db_session.execute(select(Parent).where(Parent.document_id == doc1_id)).scalars().all()
+    old_c = db_session.execute(select(Child).where(Child.document_id == doc1_id)).scalars().all()
+    assert len(old_p) == 0
+    assert len(old_c) == 0
+
+    # Verify only ONE document with this filename exists
+    all_matching = db_session.execute(select(Document).where(Document.filename == filename)).scalars().all()
+    assert len(all_matching) == 1
+    assert all_matching[0].id == doc2_id
+
+
+def test_ingest_defensive_parent_deduplication(db_session):
+    """Assert defensive de-duplication skips parents whose normalized text hash already exists in the same document."""
+    from unittest.mock import patch
+    from backend.app.ingestion.chunker import ParentChunk
+
+    pdf_path = Path("data/generated/sop_infection_control.pdf")
+    duplicate_parents = [
+        ParentChunk(
+            section_title="1.0 Unique Section",
+            text="This is unique clinical section content.",
+            page_start=1,
+            page_end=1,
+        ),
+        ParentChunk(
+            section_title="1.0 Unique Section Duplicate",
+            text="  This is  unique clinical   section content.  ",  # duplicate normalized text
+            page_start=1,
+            page_end=1,
+        ),
+        ParentChunk(
+            section_title="2.0 Another Section",
+            text="This is different clinical section content.",
+            page_start=2,
+            page_end=2,
+        ),
+    ]
+
+    with patch("backend.app.ingestion.service.build_parents", return_value=duplicate_parents):
+        result = ingest_document(
+            db=db_session,
+            source=pdf_path,
+            filename="test_dedup_defense.pdf",
+            doc_type="sop",
+        )
+        assert result.parent_chunks == 2
+        # verify in DB
+        db_parents = db_session.execute(
+            select(Parent).where(Parent.document_id == result.document_id)
+        ).scalars().all()
+        assert len(db_parents) == 2
+        titles = [p.section_title for p in db_parents]
+        assert "1.0 Unique Section" in titles
+        assert "2.0 Another Section" in titles
+        assert "1.0 Unique Section Duplicate" not in titles
+

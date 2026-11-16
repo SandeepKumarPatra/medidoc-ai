@@ -35,12 +35,18 @@ class Settings(BaseSettings):
     child_chunk_size: int = 300
     child_chunk_overlap: int = 50
 
-    # Reranker & LLM (for later phases)
+    # Reranker & LLM
+    # Supported reranker models:
+    # - "BAAI/bge-reranker-base" (default cross-encoder)
+    # - "cross-encoder/ms-marco-MiniLM-L-6-v2" (fast, lightweight CPU option)
+    # - "BAAI/bge-reranker-v2-m3" (multilingual cross-encoder)
     reranker_model: str = "BAAI/bge-reranker-base"
+    rerank_candidates: int = 10
     llm_provider: str = "gemini"
     gemini_api_key: str = ""
     llm_model: str = "gemini-2.5-flash"
     openai_api_key: str = ""
+    llm_timeout: float = 30.0
 
     @field_validator("cors_origins", mode="before")
     @classmethod
