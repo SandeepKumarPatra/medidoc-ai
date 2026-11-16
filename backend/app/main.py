@@ -8,7 +8,9 @@ Configures CORS, database lifecycles, and core REST endpoints:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, List, Literal, Optional
 
@@ -21,10 +23,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import get_settings
 from backend.app.db.init_db import init_db
-from backend.app.db.models import Child, Document, Parent
+from backend.app.db.models import AuditLog, Child, Document, Extraction, Parent, ValidationIssue
 from backend.app.db.session import get_db
+from backend.app.extraction.extractor import extract_clinical_document
+from backend.app.extraction.schema import ClinicalExtraction
+from backend.app.extraction.validator import ValidationIssueSchema, validate_extraction
 from backend.app.ingestion.embedder import get_embedder
 from backend.app.ingestion.service import ingest_document
+from backend.app.privacy.audit import record_audit_log
 from backend.app.retrieval.qa import answer_question
 from backend.app.retrieval.rerank import get_cross_encoder
 from backend.app.retrieval.service import retrieve
@@ -110,6 +116,19 @@ class DocumentItem(BaseModel):
     parent_count: int = Field(..., description="Count of parent sections")
     child_count: int = Field(..., description="Count of child vector chunks")
     created_at: str = Field(..., description="ISO 8601 creation timestamp")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExtractResponse(BaseModel):
+    """Clinical document extraction response schema."""
+
+    extraction: ClinicalExtraction = Field(..., description="Structured clinical data extracted from document")
+    validation_issues: List[ValidationIssueSchema] = Field(..., description="Validation issues identified by rules")
+    pii_items_masked: int = Field(..., description="Total count of PII/PHI items redacted prior to LLM call")
+    prompt_version: str = Field(..., description="Version of extraction prompt template")
+    llm_model: str = Field(..., description="LLM model identifier used for extraction")
+    latency_ms: float = Field(..., description="Extraction latency in milliseconds")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -235,12 +254,22 @@ async def ingest_pdf(
             detail="Invalid file format. Uploaded file content does not have a valid PDF signature.",
         )
 
+    t0 = time.perf_counter()
     try:
         result = ingest_document(
             db=db,
             source=content,
             filename=file.filename,
             doc_type=doc_type.lower(),
+        )
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        record_audit_log(
+            db=db,
+            endpoint="/ingest",
+            document_id=result.document_id,
+            pii_items_masked=0,
+            latency_ms=latency_ms,
+            status="success",
         )
         message = (
             "Document already ingested (duplicate detected by file hash)"
@@ -258,6 +287,18 @@ async def ingest_pdf(
             message=message,
         )
     except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/ingest",
+                document_id=None,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
         logger.error("Failed to ingest document %s: %s", file.filename, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -332,6 +373,7 @@ def ask_question_endpoint(
     - Cites sources as [document, pages]
     - Returns answer, sources, retrieved IDs, stage timings, prompt (only when debug=true), and prompt_version
     """
+    t0 = time.perf_counter()
     try:
         retrieval_res = retrieve(
             question=request.question,
@@ -340,6 +382,16 @@ def ask_question_endpoint(
             db=db,
         )
         answer_res = answer_question(retrieval_response=retrieval_res)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        record_audit_log(
+            db=db,
+            endpoint="/ask",
+            document_id=None,
+            pii_items_masked=0,
+            latency_ms=latency_ms,
+            status="success",
+        )
 
         logger.info(
             "Completed /ask request (mode=%s): model=%s, generation_ms=%s ms, timings=%s",
@@ -368,15 +420,248 @@ def ask_question_endpoint(
             prompt_version=answer_res.prompt_version,
         )
     except TimeoutError as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/ask",
+                document_id=None,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
         logger.error("LLM timeout processing question '%s': %s", request.question, exc)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=f"LLM request timed out: {exc}",
         )
     except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/ask",
+                document_id=None,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
         logger.error("Error processing question '%s': %s", request.question, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process question: {exc}",
+        )
+
+
+@app.post(
+    "/extract",
+    response_model=ExtractResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Extract structured clinical JSON and validation issues from a PDF report",
+    tags=["Extraction & Validation"],
+)
+async def extract_pdf_endpoint(
+    file: UploadFile = File(..., description="PDF clinical document (discharge summary or lab report)"),
+    db: Session = Depends(get_db),
+) -> ExtractResponse:
+    """Upload a clinical PDF, mask PII, extract structured JSON via LLM, and run validation rules.
+
+    - Validates PDF extension and signature
+    - Rejects files over 20 MB
+    - Masks names, phone numbers, emails, MRNs before LLM invocation
+    - Never returns or logs masked text or raw clinical text
+    - Persists extraction and validation issues in database
+    - Records metadata-only audit log row
+    """
+    MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB
+    t0 = time.perf_counter()
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Uploaded file must have a .pdf extension.",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded PDF file is empty.",
+        )
+
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum limit of 20 MB (received {len(content)} bytes).",
+        )
+
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Uploaded file content does not have a valid PDF signature.",
+        )
+
+    file_hash = hashlib.sha256(content).hexdigest()
+    doc_type = "lab" if "lab" in file.filename.lower() else "discharge"
+
+    # Find or initialize document record for foreign-key attachment
+    doc = db.query(Document).filter(Document.file_hash == file_hash).first()
+    if not doc:
+        doc = Document(
+            filename=file.filename,
+            doc_type=doc_type,
+            status="extracted",
+            page_count=1,
+            file_hash=file_hash,
+        )
+        db.add(doc)
+        db.flush()
+
+    try:
+        extraction_res = extract_clinical_document(
+            source=content,
+            filename=file.filename,
+        )
+    except TimeoutError as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/extract",
+                document_id=doc.id,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
+        logger.error("LLM timeout during extraction for %s: %s", file.filename, exc)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"LLM extraction request timed out: {exc}",
+        )
+    except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/extract",
+                document_id=doc.id,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
+        logger.error("Extraction failed for %s: %s", file.filename, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to extract structured data from PDF: {exc}",
+        )
+
+    # Update document page count
+    doc.page_count = extraction_res.page_count
+
+    # Persist extraction row
+    extraction_row = Extraction(
+        document_id=doc.id,
+        json_result=extraction_res.raw_dict,
+        model=extraction_res.llm_model,
+        prompt_version=extraction_res.prompt_version,
+    )
+    db.add(extraction_row)
+    db.flush()
+
+    # Persist validation issue rows
+    for issue in extraction_res.validation_issues:
+        v_issue = ValidationIssue(
+            extraction_id=extraction_row.id,
+            field=issue.field,
+            rule=issue.rule,
+            severity=issue.severity,
+            message=issue.message,
+        )
+        db.add(v_issue)
+
+    total_latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    # Write audit log row
+    record_audit_log(
+        db=db,
+        endpoint="/extract",
+        document_id=doc.id,
+        pii_items_masked=extraction_res.pii_items_masked,
+        latency_ms=total_latency_ms,
+        status="success",
+    )
+
+    db.commit()
+
+    return ExtractResponse(
+        extraction=extraction_res.extraction,
+        validation_issues=extraction_res.validation_issues,
+        pii_items_masked=extraction_res.pii_items_masked,
+        prompt_version=extraction_res.prompt_version,
+        llm_model=extraction_res.llm_model,
+        latency_ms=round(total_latency_ms, 2),
+    )
+
+
+@app.post(
+    "/validate",
+    response_model=List[ValidationIssueSchema],
+    status_code=status.HTTP_200_OK,
+    summary="Validate extracted clinical data against hospital rules",
+    tags=["Extraction & Validation"],
+)
+def validate_clinical_data_endpoint(
+    extraction: ClinicalExtraction,
+    db: Session = Depends(get_db),
+) -> List[ValidationIssueSchema]:
+    """Validate extracted clinical JSON against SPEC.md rules.
+
+    Checks:
+    - discharge_date must not be before admission_date
+    - every medication has a dose and a unit
+    - diagnosis list is not empty
+    - age between 0 and 120
+
+    Returns list of validation issues found. Never stores or logs clinical text.
+    """
+    t0 = time.perf_counter()
+    try:
+        issues = validate_extraction(extraction)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        record_audit_log(
+            db=db,
+            endpoint="/validate",
+            document_id=None,
+            pii_items_masked=0,
+            latency_ms=latency_ms,
+            status="success",
+        )
+        return issues
+    except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            record_audit_log(
+                db=db,
+                endpoint="/validate",
+                document_id=None,
+                pii_items_masked=0,
+                latency_ms=latency_ms,
+                status="error",
+            )
+        except Exception:
+            pass
+        logger.error("Validation failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to validate clinical data: {exc}",
         )
 

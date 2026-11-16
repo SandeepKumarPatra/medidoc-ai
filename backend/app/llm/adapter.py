@@ -12,7 +12,7 @@ import concurrent.futures
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional, Type
 
 from backend.app.config import get_settings
 
@@ -32,6 +32,19 @@ class BaseLLMAdapter(ABC):
 
         Returns:
             Generated model output string.
+        """
+        pass
+
+    @abstractmethod
+    def generate_structured(self, prompt: str, schema: Type[Any]) -> Any:
+        """Generate structured output adhering to a Pydantic schema or schema dict.
+
+        Args:
+            prompt: Formatted prompt text.
+            schema: Target Pydantic BaseModel class or JSON schema.
+
+        Returns:
+            Extracted structured object conforming to schema.
         """
         pass
 
@@ -121,6 +134,23 @@ class GeminiLLMAdapter(BaseLLMAdapter):
                     f"LLM generation timed out after {self.timeout}s (model: {self.model_name})"
                 )
 
+    def _invoke_structured(self, prompt: str, schema: Type[Any]) -> Any:
+        """Internal synchronous call to Gemini LLM with structured output."""
+        client = self._get_client()
+        structured_llm = client.with_structured_output(schema)
+        return structured_llm.invoke(prompt)
+
+    def generate_structured(self, prompt: str, schema: Type[Any]) -> Any:
+        """Invoke Gemini LLM with structured output bounded by configurable timeout."""
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self._invoke_structured, prompt, schema)
+            try:
+                return future.result(timeout=self.timeout)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"LLM structured generation timed out after {self.timeout}s (model: {self.model_name})"
+                )
+
     def get_model_name(self) -> str:
         return self.model_name
 
@@ -185,6 +215,42 @@ class OpenAILLMAdapter(BaseLLMAdapter):
                 except concurrent.futures.TimeoutError:
                     raise TimeoutError(
                         f"LLM generation timed out after {self.timeout}s (model: {self.model_name})"
+                    )
+        except ImportError:
+            raise NotImplementedError(
+                "langchain-openai is required for OpenAI integration. Please install it or use Gemini."
+            )
+
+    def _invoke_structured(self, prompt: str, schema: Type[Any]) -> Any:
+        from langchain_openai import ChatOpenAI
+
+        if self._llm is None:
+            self._llm = ChatOpenAI(
+                model=self.model_name,
+                api_key=self.api_key,
+                temperature=self.temperature,
+                timeout=self.timeout,
+            )
+        structured_llm = self._llm.with_structured_output(schema)
+        return structured_llm.invoke(prompt)
+
+    def generate_structured(self, prompt: str, schema: Type[Any]) -> Any:
+        """Invoke OpenAI structured output if configured and keyed, otherwise report stub status."""
+        if not self.api_key or self.api_key.startswith("your-") or "placeholder" in self.api_key.lower():
+            raise NotImplementedError(
+                "OpenAI adapter is currently operating as a stub. "
+                "To enable live OpenAI generation, set OPENAI_API_KEY in your environment, "
+                "or switch LLM_PROVIDER to 'gemini'."
+            )
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self._invoke_structured, prompt, schema)
+                try:
+                    return future.result(timeout=self.timeout)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(
+                        f"LLM structured generation timed out after {self.timeout}s (model: {self.model_name})"
                     )
         except ImportError:
             raise NotImplementedError(

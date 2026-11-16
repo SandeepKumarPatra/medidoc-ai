@@ -82,3 +82,19 @@ This document tracks key architectural decisions, rationale, and documented trad
 
 - **What was built:** Added document replacement semantics on filename re-upload (deleting old child/parent records first) and defensive parent de-duplication via normalized text MD5 hashing. Lowered `RERANK_CANDIDATES` default to 10 with configurable choices, and instrumented `POST /ask` with model name/generation latency logging alongside a 30s LLM execution timeout.
 - **Why this design:** Replacing obsolete document chunks during re-upload eliminates stale cross-document section duplication while normalized text hashing shields against parsing repetitions; trimming rerank candidates to 10 cuts CPU latency by ~41% (to ~3.9s) while bounded LLM timeouts prevent indefinite client thread blocking.
+
+---
+
+## Decision 007: Phase 3 Clinical Extraction, Rule Validation, PII Masking, and Audit Logging
+
+- **What was built:**
+  - Implemented multi-tier PII masker (`backend/app/privacy/masking.py`) replacing names, phone numbers, email addresses, and MRN/IDs with tokens (`[NAME]`, `[PHONE]`, `[EMAIL]`, `[MRN]`) while preserving clinical terms, ages, dates, and dosages.
+  - Implemented Pydantic clinical extraction schema (`backend/app/extraction/schema.py`) conforming to SPEC.md section 6 with nullable medication dose and unit.
+  - Implemented structured extraction pipeline (`backend/app/extraction/extractor.py`) with `prompt_version="extract-v1.0"`, single-turn schema retry on failure, and adapter extension `generate_structured()` without modifying `generate()`.
+  - Implemented business rule validator (`backend/app/extraction/validator.py`) enforcing admission/discharge dates, complete medication dosages, non-empty diagnoses, and patient ages (0-120).
+  - Implemented metadata-only audit logging (`backend/app/privacy/audit.py`) instrumented across `/ask`, `/ingest`, `/extract`, and `/validate`, and exposed REST endpoints `POST /extract` and `POST /validate`.
+
+- **Why this design & Known Limitations:**
+  - Redacting PII prior to LLM inference prevents PHI exposure outside system boundaries while preserving clinical document layout for downstream tasks.
+  - Known limitation: Labelled-field and regex patterns reliably capture demographic headers and common clinical ID formats, but unlabelled proper names embedded within free narrative prose cannot be completely eliminated without risk of false positives on clinical nomenclature.
+  - Audit log table strictly records operational metrics (endpoint, document_id, pii_items_masked, latency_ms, status) and never stores document text, prompts, answers, or extracted clinical values.

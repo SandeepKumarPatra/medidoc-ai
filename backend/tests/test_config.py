@@ -6,7 +6,7 @@ from backend.app.config import Settings, get_settings
 
 def test_settings_defaults():
     """Verify default configuration attributes."""
-    settings = get_settings()
+    settings = Settings(_env_file=None)
     assert settings.embedding_dim == 384
     assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
     assert settings.parent_chunk_size == 1500

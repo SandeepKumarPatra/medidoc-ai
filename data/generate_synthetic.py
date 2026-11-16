@@ -659,7 +659,7 @@ def get_synthetic_reports_dataset() -> List[Dict[str, Any]]:
             "summary": (
                 "41-year-old male presenting with acute right lower quadrant abdominal pain and leukocytosis. "
                 "Laparoscopic appendectomy performed with uncomplicated intraoperative course. Tolerating regular diet, "
-                "ambulating independently, pain controlled on oral analgesics. Note: administrative dates reflect clerical error."
+                "ambulating independently, pain controlled on oral analgesics."
             ),
             "deliberate_errors": [
                 {
