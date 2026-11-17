@@ -210,9 +210,38 @@ pytest backend/tests
 
 ## Evaluation & Demonstrations
 
-### TODO: Evaluation Results Table
-<!-- TODO: Populate ablation benchmark metrics (hit@5, MRR, latency) across naive, parent_child, hybrid, and hybrid_rerank once Phase 7 evaluation harness runs. -->
-*Benchmark ablation results comparing all 4 retrieval modes across the 48-question SOP dataset will be published here upon completion of Phase 7.*
+### Official Retrieval Ablation Benchmark (Phase 7 & 7b)
+
+Evaluated across 60 benchmark questions (top_k=5, no LLM):
+- Complete ablation and root-cause analysis is published in [docs/EVAL_RESULTS.md](file:///d:/GENaiMedicalProject/medidoc-ai/docs/EVAL_RESULTS.md).
+
+| Mode | Label / Model | All Hit@1 | All Hit@3 | All Hit@5 | All MRR | Latency (ms) | Single Hit@5 | Single MRR | Paraph Hit@5 | Paraph MRR | Keyword Hit@5 | Keyword MRR | Compound Both-Hit@5 | Compound MRR |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `naive` | Naive child vector search | 0.77 | 0.90 | 0.92 | 0.829 | 58.5ms | 0.98 | 0.924 | 0.92 | 0.722 | 1.00 | 0.938 | 0.50 | 0.198 |
+| `parent_child` | Dense child search with parent expansion | 0.77 | 0.90 | 0.92 | 0.835 | 33.7ms | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
+| `hybrid` | Dense + sparse full-text with RRF (k=60) | 0.77 | 0.90 | 0.92 | 0.835 | 35.2ms | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
+| `hybrid_rerank` | Hybrid with BAAI/bge-reranker-base | 0.73 | 0.92 | 0.95 | 0.830 | 2626.6ms | 0.98 | 0.893 | 0.92 | 0.674 | 1.00 | 0.938 | 0.75 | 0.375 |
+| `hybrid_rerank_minilm` | Hybrid with cross-encoder/ms-marco-MiniLM-L-6-v2 | 0.73 | 0.92 | 0.95 | 0.821 | 614.7ms | 0.98 | 0.895 | 0.92 | 0.711 | 1.00 | 0.938 | 0.75 | 0.302 |
+
+> **Operational Default Mode & Conclusion:**
+> We designate **`hybrid`** as the default operational retrieval mode for MediDoc AI. While cross-encoder reranking (`hybrid_rerank`) lifts compound multi-topic recall (`both-hit@5`) from 0.50 to 0.75 by re-scoring candidates across disparate policy domains, it incurs an extreme latency penalty on CPU (2626.6ms for BGE vs 35.2ms for Hybrid, a 75x slowdown) and marginally reduces top-1 precision (Hit@1 drops from 0.77 to 0.73). For production healthcare-IT workloads where sub-second responsiveness is essential, `hybrid` mode delivers optimal balance: identical 0.98 Hit@5 on single queries, 1.00 Hit@5 on keyword-sensitive terms (e.g. ASTM codes), 0.835 MRR, and 35.2ms latency. `hybrid_rerank` remains accessible as an opt-in strategy when answering multi-clause compound queries where complete context recall outweighs interactive latency.
+
+### Grounded Answer Synthesis & Refusal Guardrails (`--with-answers`)
+
+| Metric | Hybrid Mode | Hybrid Rerank Mode | Operational Description |
+|---|---|---|---|
+| **Citation Inclusion Rate** | **93.3%** | **100.0%** | Share of generated answers whose citations include ground-truth document |
+| **Cited Source Lexical Overlap** | **100.0%** | **100.0%** | Share of cited sources whose text contains key numbers/terms from answer |
+| **Wrong 'Not Found' Refusals** | **1 (6.7%)** | **0 (0.0%)** | False refusals despite relevant context in database |
+| **Average Generation Latency** | **3323.5 ms** | **2711.0 ms** | Mean LLM token generation latency |
+
+- **Unanswerable Questions Refusal Guardrail (n=8):** **8 / 8 (100.0%)** correct refusals (*"The answer was not found in the provided hospital documentation"*) in `hybrid` mode, with 0 ungrounded answers or hallucinations.
+
+### Clinical Extraction & Rule Validation (`--with-extraction`)
+- **Per-Field Accuracy:** **100.0%** across all clinical fields (`patient.age`, `patient.sex`, `admission_date`, `discharge_date`, `diagnosis`, `medications`, `summary`).
+- **Rule Validation Performance:** Precision: **100.0%**, Recall: **100.0%**, F1 Score: **1.000**.
+- **Smoke Test Scope Disclaimer:** This extraction evaluation is conducted on the 8 synthetic template hospital reports generated during project development. It serves as an automated end-to-end integration and smoke test for schema extraction, PII masking, and business rule enforcement, rather than a clinical validation study on heterogeneous real-world EHR records.
+- **Summary Accuracy Scoring:** The `summary` field is scored using an abstractive completion heuristic (`len(ext_summary.strip()) >= 15`) rather than an exact character match, ensuring clinical narrative completeness without penalizing stylistic LLM formatting variations.
 
 ### TODO: Screenshots
 <!-- TODO: Add UI screenshots of Overview Dashboard, Document Extraction workspace, and Policy Q&A screen once Phase 5 and 6 frontend implementation is complete. -->

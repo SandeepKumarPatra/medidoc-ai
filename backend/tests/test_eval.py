@@ -24,12 +24,16 @@ from sqlalchemy.orm import Session
 
 from backend.app.db.models import EvalResult, EvalRun
 from backend.app.eval.metrics import (
+    compare_hybrid_vs_dense,
     compute_category_breakdown,
     compute_retrieval_metrics,
     evaluate_clinical_extraction,
     evaluate_single_answer,
+    evaluate_unanswerable_question,
+    is_not_found_response,
     summarize_answers_evaluation,
     summarize_extraction_evaluation,
+    summarize_unanswerable_evaluation,
 )
 from backend.app.eval.runner import (
     identify_worst_questions,
@@ -37,11 +41,15 @@ from backend.app.eval.runner import (
     run_answers_evaluation,
     run_extraction_evaluation,
     run_retrieval_mode_evaluation,
+    run_unanswerable_evaluation,
 )
 from backend.app.eval.schemas import (
     AnswerEvalDetail,
     ExtractionReportDetail,
+    HybridVsDenseComparison,
     QuestionEvalItem,
+    UnanswerableDetail,
+    UnanswerableEvalSummary,
 )
 from backend.app.extraction.schema import ClinicalExtraction
 from backend.app.llm.adapter import BaseLLMAdapter
@@ -146,7 +154,7 @@ def test_retrieval_metrics_calculation():
 
 
 def test_category_segmentation():
-    """Verify metrics segmentation into overall, single, paraphrased, and compound."""
+    """Verify metrics segmentation into overall, single, paraphrased, keyword, and compound."""
     items = [
         QuestionEvalItem(
             question_id="q_single_direct",
@@ -169,6 +177,16 @@ def test_category_segmentation():
             latency_ms=12.0,
         ),
         QuestionEvalItem(
+            question_id="q_keyword_1",
+            category="keyword",
+            paraphrased=False,
+            expected_doc="doc3.pdf",
+            hit=True,
+            rank=1,
+            reciprocal_rank=1.0,
+            latency_ms=14.0,
+        ),
+        QuestionEvalItem(
             question_id="q_compound_1",
             category="compound",
             paraphrased=False,
@@ -182,18 +200,195 @@ def test_category_segmentation():
 
     breakdown = compute_category_breakdown(items)
 
-    assert breakdown.all.total_questions == 3
+    assert breakdown.all.total_questions == 4
     assert breakdown.single.total_questions == 2
     assert breakdown.paraphrased.total_questions == 1
+    assert breakdown.keyword.total_questions == 1
     assert breakdown.compound.total_questions == 1
 
     # Paraphrased hit@5 should be 1.0 (1/1)
     assert breakdown.paraphrased.hit_at_5 == 1.0
     assert breakdown.paraphrased.mrr == 0.5
 
+    # Keyword hit@5 should be 1.0 (1/1)
+    assert breakdown.keyword.hit_at_5 == 1.0
+    assert breakdown.keyword.mrr == 1.0
+
     # Compound hit@5 should be 0.0
     assert breakdown.compound.hit_at_5 == 0.0
     assert breakdown.compound.mrr == 0.0
+
+
+def test_compound_both_hit_at_5():
+    """Verify compound both-hit@5 logic: hit is scored ONLY when both targets are in top 5."""
+    items = [
+        QuestionEvalItem(
+            question_id="q_comp_success",
+            category="compound",
+            paraphrased=False,
+            expected_doc="doc1.pdf",
+            expected_sections=[
+                {"doc": "doc1.pdf", "section": "Sec 1"},
+                {"doc": "doc2.pdf", "section": "Sec 2"},
+            ],
+            hit=True,
+            rank=3,
+            reciprocal_rank=1.0 / 3.0,
+            both_hit_at_5=True,
+            retrieved_docs=["doc1.pdf", "other.pdf", "doc2.pdf"],
+            retrieved_section_titles=["Sec 1", "Other", "Sec 2"],
+        ),
+        QuestionEvalItem(
+            question_id="q_comp_partial",
+            category="compound",
+            paraphrased=False,
+            expected_doc="doc1.pdf",
+            expected_sections=[
+                {"doc": "doc1.pdf", "section": "Sec 1"},
+                {"doc": "doc2.pdf", "section": "Sec 2"},
+            ],
+            hit=False,
+            rank=None,
+            reciprocal_rank=0.0,
+            both_hit_at_5=False,
+            retrieved_docs=["doc1.pdf", "other.pdf", "other2.pdf"],
+            retrieved_section_titles=["Sec 1", "Other", "Other2"],
+        ),
+    ]
+
+    metrics = compute_retrieval_metrics(items)
+    # Total = 2, only 1 had both targets in top 5 -> 1/2 = 0.5
+    assert metrics.compound_both_hit_at_5 == 0.5
+    assert metrics.hit_at_5 == 0.5
+    assert metrics.mrr == round((1.0 / 3.0) / 2.0, 4)
+
+
+def test_unanswerable_question_evaluation():
+    """Verify evaluation of unanswerable questions for refusal detection."""
+    # 1. Correct refusal
+    ans_refusal = AnswerResult(
+        answer="The requested policy details were not found in the provided hospital documentation.",
+        sources=[],
+        citations=[],
+        retrieved_ids=[],
+        timings={"total_ms": 100.0, "generation_ms": 50.0},
+        prompt="question",
+        prompt_version="rag-clinical-v1.1",
+    )
+    detail_refusal = evaluate_unanswerable_question(
+        {"id": "q_unans_01", "question": "What is the policy for robotic laser neurosurgery?"},
+        ans_refusal,
+    )
+    assert detail_refusal.correctly_not_found is True
+    assert detail_refusal.wrongly_produced_answer is False
+
+    # 2. Wrong produced answer (hallucination)
+    ans_hallucinated = AnswerResult(
+        answer="Robotic laser neurosurgery requires calibration every 6 hours and approval by chief of surgery.",
+        sources=[],
+        citations=[],
+        retrieved_ids=[],
+        timings={"total_ms": 120.0, "generation_ms": 70.0},
+        prompt="question",
+        prompt_version="rag-clinical-v1.1",
+    )
+    detail_hallucinated = evaluate_unanswerable_question(
+        {"id": "q_unans_02", "question": "What is the policy for robotic laser neurosurgery?"},
+        ans_hallucinated,
+    )
+    assert detail_hallucinated.correctly_not_found is False
+    assert detail_hallucinated.wrongly_produced_answer is True
+
+    # 3. Summary
+    summary = summarize_unanswerable_evaluation([detail_refusal, detail_hallucinated])
+    assert summary.total_evaluated == 2
+    assert summary.correctly_not_found_count == 1
+    assert summary.correctly_not_found_rate == 0.5
+    assert summary.wrongly_produced_count == 1
+    assert summary.wrongly_produced_rate == 0.5
+
+
+def test_hybrid_vs_dense_comparison():
+    """Verify counting differing top-1 and top-5 candidates between hybrid and dense."""
+    dense_items = [
+        QuestionEvalItem(
+            question_id="q1",
+            category="single",
+            expected_doc="d1",
+            hit=True,
+            rank=1,
+            retrieved_section_titles=["Sec A", "Sec B", "Sec C", "Sec D", "Sec E"],
+        ),
+        QuestionEvalItem(
+            question_id="q2",
+            category="single",
+            expected_doc="d1",
+            hit=True,
+            rank=1,
+            retrieved_section_titles=["Sec 1", "Sec 2", "Sec 3", "Sec 4", "Sec 5"],
+        ),
+    ]
+
+    hybrid_items = [
+        QuestionEvalItem(
+            question_id="q1",
+            category="single",
+            expected_doc="d1",
+            hit=True,
+            rank=1,
+            # Same top-1 ("Sec A"), but 5th element differs ("Sec Z")
+            retrieved_section_titles=["Sec A", "Sec B", "Sec C", "Sec D", "Sec Z"],
+        ),
+        QuestionEvalItem(
+            question_id="q2",
+            category="single",
+            expected_doc="d1",
+            hit=True,
+            rank=1,
+            # Different top-1 ("Sec X")
+            retrieved_section_titles=["Sec X", "Sec 1", "Sec 2", "Sec 3", "Sec 4"],
+        ),
+    ]
+
+    comp = compare_hybrid_vs_dense(dense_items, hybrid_items)
+    assert comp.total_questions == 2
+    # Only q2 had different top 1
+    assert comp.different_top_1_count == 1
+    assert comp.different_top_1_rate == 0.5
+    # Both q1 and q2 had different top 5 sets
+    assert comp.different_top_5_count == 2
+    assert comp.different_top_5_rate == 1.0
+
+
+def test_summary_heuristic_evaluation():
+    """Verify that clinical summary is scored with completion heuristic (len >= 15)."""
+    # Summary >= 15 chars should pass
+    valid_ext = {
+        "summary": "Patient was discharged after successful observation and treatment.",
+        "diagnosis": ["Hypertension"],
+    }
+    gt = {
+        "summary": "Complete recovery after medical management.",
+        "diagnosis": ["Hypertension"],
+    }
+    detail = evaluate_clinical_extraction(
+        extracted_dict=valid_ext,
+        ground_truth_dict=gt,
+        detected_issues=[],
+    )
+    assert detail.field_matches["summary"] is True
+
+    # Short summary (<15 chars) should fail heuristic
+    short_ext = {
+        "summary": "Too short",
+        "diagnosis": ["Hypertension"],
+    }
+    detail_short = evaluate_clinical_extraction(
+        extracted_dict=short_ext,
+        ground_truth_dict=gt,
+        detected_issues=[],
+    )
+    assert detail_short.field_matches["summary"] is False
 
 
 # ==============================================================================

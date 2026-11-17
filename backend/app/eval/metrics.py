@@ -20,8 +20,11 @@ from backend.app.eval.schemas import (
     CategoryBreakdown,
     ExtractionEvalSummary,
     ExtractionReportDetail,
+    HybridVsDenseComparison,
     MetricScores,
     QuestionEvalItem,
+    UnanswerableDetail,
+    UnanswerableEvalSummary,
 )
 
 STOPWORDS: Set[str] = {
@@ -36,7 +39,7 @@ STOPWORDS: Set[str] = {
 def compute_retrieval_metrics(
     eval_items: List[QuestionEvalItem],
 ) -> MetricScores:
-    """Compute hit@1, hit@3, hit@5, MRR, and average latency for a list of question results."""
+    """Compute hit@1, hit@3, hit@5, MRR, latency, and compound both-hit@5."""
     total = len(eval_items)
     if total == 0:
         return MetricScores()
@@ -59,6 +62,14 @@ def compute_retrieval_metrics(
             if item.rank <= 5:
                 hit_5_count += 1
 
+    both_hit_items = [item for item in eval_items if item.both_hit_at_5 is not None]
+    compound_both_hit = None
+    if both_hit_items:
+        compound_both_hit = round(
+            sum(1 for item in both_hit_items if item.both_hit_at_5) / len(both_hit_items),
+            4,
+        )
+
     return MetricScores(
         total_questions=total,
         hit_at_1=round(hit_1_count / total, 4),
@@ -66,6 +77,7 @@ def compute_retrieval_metrics(
         hit_at_5=round(hit_5_count / total, 4),
         mrr=round(mrr_sum / total, 4),
         avg_latency_ms=round(latency_sum / total, 2),
+        compound_both_hit_at_5=compound_both_hit,
     )
 
 
@@ -78,8 +90,11 @@ def compute_category_breakdown(
     single_items = [i for i in eval_items if i.category == "single"]
     single_metrics = compute_retrieval_metrics(single_items)
 
-    paraphrased_items = [i for i in single_items if i.paraphrased]
+    paraphrased_items = [i for i in eval_items if i.paraphrased]
     paraphrased_metrics = compute_retrieval_metrics(paraphrased_items)
+
+    keyword_items = [i for i in eval_items if i.category == "keyword"]
+    keyword_metrics = compute_retrieval_metrics(keyword_items)
 
     compound_items = [i for i in eval_items if i.category == "compound"]
     compound_metrics = compute_retrieval_metrics(compound_items)
@@ -88,8 +103,30 @@ def compute_category_breakdown(
         all=all_metrics,
         single=single_metrics,
         paraphrased=paraphrased_metrics,
+        keyword=keyword_metrics,
         compound=compound_metrics,
     )
+
+
+def is_not_found_response(raw_answer: str) -> bool:
+    """Determine whether an answer indicates a refusal or 'not found' outcome."""
+    not_found_phrases = [
+        "not found in the provided hospital documentation",
+        "was not found in the provided",
+        "the answer was not found",
+        "not mentioned in the provided",
+        "cannot answer this question based on the provided",
+        "does not contain sufficient information",
+        "not contained in the provided",
+        "not found in the provided",
+        "not found in provided",
+        "unable to find",
+        "cannot be found",
+        "no information is provided",
+        "no information provided",
+    ]
+    raw_lower = raw_answer.lower()
+    return any(p in raw_lower for p in not_found_phrases)
 
 
 def evaluate_single_answer(
@@ -113,14 +150,11 @@ def evaluate_single_answer(
 
     # (b) Check lexical/numerical overlap between answer sentences and cited source text
     overlap_details: List[Dict[str, Any]] = []
-    # Build a lookup from source citation to source text
     sources = getattr(answer_result, "sources", [])
     source_map: Dict[int, str] = {}
     for idx, s in enumerate(sources, start=1):
-        # Retrieved chunks text can be matched from answer_result
         source_map[idx] = getattr(s, "citation", "")
 
-    # Look for numbers and key words in the answer
     num_pattern = re.compile(r"\b\d+(?:\.\d+)?%?\b")
     word_pattern = re.compile(r"\b[A-Za-z]{4,}\b")
 
@@ -131,16 +165,12 @@ def evaluate_single_answer(
         if w.lower() not in STOPWORDS
     }
 
-    # Inspect all retrieved sources matching cited sources
     for cited in cited_sources:
         s_idx = getattr(cited, "source_index", None)
-        # Find corresponding source in answer_result.sources
         src_text = ""
         if s_idx and 1 <= s_idx <= len(sources):
             src_obj = sources[s_idx - 1]
-            # Retrieved chunks text
             src_text = getattr(src_obj, "citation", "") + " " + getattr(src_obj, "section_title", "")
-        # Also check all sources for matching document and section
         for s in sources:
             if getattr(s, "document", "") == getattr(cited, "document", ""):
                 src_text += " " + (getattr(s, "section_title", "") or "")
@@ -162,14 +192,7 @@ def evaluate_single_answer(
         )
 
     # (c) Wrong 'not found' refusal detection
-    not_found_phrases = [
-        "not found in the provided hospital documentation",
-        "was not found in the provided",
-        "the answer was not found",
-        "not mentioned in the provided",
-    ]
-    is_refusal = any(p in raw_answer.lower() for p in not_found_phrases)
-    # The evaluation set only contains questions whose answers exist in the SOPs
+    is_refusal = is_not_found_response(raw_answer)
     is_wrong_not_found = is_refusal
 
     return AnswerEvalDetail(
@@ -220,6 +243,102 @@ def summarize_answers_evaluation(
         wrong_not_found_rate=round(wrong_not_found_count / total, 4),
         avg_generation_ms=round(total_gen_ms / total, 2),
         details=eval_details,
+    )
+
+
+def evaluate_unanswerable_question(
+    question_data: Dict[str, Any],
+    answer_result: Any,
+) -> UnanswerableDetail:
+    """Evaluate whether an unanswerable question correctly returned a 'not found' response."""
+    qid = question_data.get("id", "")
+    q_text = question_data.get("question", "")
+    raw_answer = getattr(answer_result, "answer", str(answer_result))
+    timings = getattr(answer_result, "timings", {})
+    gen_ms = float(timings.get("generation_ms", 0.0))
+
+    is_refusal = is_not_found_response(raw_answer)
+
+    return UnanswerableDetail(
+        question_id=qid,
+        question=q_text,
+        answer=raw_answer,
+        correctly_not_found=is_refusal,
+        wrongly_produced_answer=not is_refusal,
+        generation_ms=gen_ms,
+    )
+
+
+def summarize_unanswerable_evaluation(
+    details: List[UnanswerableDetail],
+) -> UnanswerableEvalSummary:
+    """Summarize metrics across unanswerable questions benchmark."""
+    total = len(details)
+    if total == 0:
+        return UnanswerableEvalSummary()
+
+    correct_count = sum(1 for d in details if d.correctly_not_found)
+    wrong_count = sum(1 for d in details if d.wrongly_produced_answer)
+    total_gen_ms = sum(d.generation_ms for d in details)
+
+    return UnanswerableEvalSummary(
+        total_evaluated=total,
+        correctly_not_found_count=correct_count,
+        correctly_not_found_rate=round(correct_count / total, 4),
+        wrongly_produced_count=wrong_count,
+        wrongly_produced_rate=round(wrong_count / total, 4),
+        avg_generation_ms=round(total_gen_ms / total, 2),
+        details=details,
+    )
+
+
+def compare_hybrid_vs_dense(
+    parent_child_items: List[QuestionEvalItem],
+    hybrid_items: List[QuestionEvalItem],
+) -> HybridVsDenseComparison:
+    """Compare top-1 and top-5 retrieved sections between hybrid and dense (parent_child) search."""
+    total = len(parent_child_items)
+    if total == 0 or len(hybrid_items) != total:
+        return HybridVsDenseComparison()
+
+    hybrid_map = {item.question_id: item for item in hybrid_items}
+    diff_top1 = 0
+    diff_top5 = 0
+
+    for pc_item in parent_child_items:
+        h_item = hybrid_map.get(pc_item.question_id)
+        if not h_item:
+            continue
+
+        if pc_item.retrieved_docs and h_item.retrieved_docs:
+            pc_top1 = (
+                pc_item.retrieved_docs[0] if pc_item.retrieved_docs else "",
+                pc_item.retrieved_section_titles[0] if pc_item.retrieved_section_titles else "",
+            )
+            h_top1 = (
+                h_item.retrieved_docs[0] if h_item.retrieved_docs else "",
+                h_item.retrieved_section_titles[0] if h_item.retrieved_section_titles else "",
+            )
+            pc_top5 = list(zip(pc_item.retrieved_docs[:5], pc_item.retrieved_section_titles[:5]))
+            h_top5 = list(zip(h_item.retrieved_docs[:5], h_item.retrieved_section_titles[:5]))
+        else:
+            pc_top1 = pc_item.retrieved_section_titles[0] if pc_item.retrieved_section_titles else ""
+            h_top1 = h_item.retrieved_section_titles[0] if h_item.retrieved_section_titles else ""
+            pc_top5 = pc_item.retrieved_section_titles[:5]
+            h_top5 = h_item.retrieved_section_titles[:5]
+
+        if pc_top1 != h_top1:
+            diff_top1 += 1
+
+        if pc_top5 != h_top5:
+            diff_top5 += 1
+
+    return HybridVsDenseComparison(
+        total_questions=total,
+        different_top_1_count=diff_top1,
+        different_top_1_rate=round(diff_top1 / total, 4),
+        different_top_5_count=diff_top5,
+        different_top_5_rate=round(diff_top5 / total, 4),
     )
 
 

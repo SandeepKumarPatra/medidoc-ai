@@ -2404,6 +2404,10 @@ SOP_QUESTIONS: List[Dict[str, Any]] = [
         "question": "What specific glove standard is required for standard examination barrier precautions, and within what timeframe must an outbreak cluster be reported to the Chief Medical Officer?",
         "expected_doc": "sop_infection_control.pdf",
         "expected_section": "4.0 Personal Protective Equipment: Gloves, Gowns, and Respirators",
+        "expected_sections": [
+            {"doc": "sop_infection_control.pdf", "section": "4.0 Personal Protective Equipment: Gloves, Gowns, and Respirators"},
+            {"doc": "sop_infection_control.pdf", "section": "12.0 Clinical Governance, Audit, and Breach Escalation"}
+        ],
         "expected_answer_snippet": "ASTM D6319; within 4 hours",
         "category": "compound",
         "paraphrased": False
@@ -2440,7 +2444,11 @@ SOP_QUESTIONS: List[Dict[str, Any]] = [
         "question": "Who is notified when a discharge is stalled more than 180 minutes past scheduled release, and what LACE score threshold mandates a telephone wellness check?",
         "expected_doc": "sop_discharge_process.pdf",
         "expected_section": "12.0 Quality Metrics, Readmission Audit, and Delay Escalation",
-        "expected_answer_snippet": "Inpatient Bed Management Director; LACE score \u2265 10",
+        "expected_sections": [
+            {"doc": "sop_discharge_process.pdf", "section": "12.0 Quality Metrics, Readmission Audit, and Delay Escalation"},
+            {"doc": "sop_discharge_process.pdf", "section": "10.0 Post-Discharge Telephonic Follow-Up (LACE Criteria)"}
+        ],
+        "expected_answer_snippet": "Inpatient Bed Management Director; LACE score ≥ 10",
         "category": "compound",
         "paraphrased": False
     },
@@ -2620,6 +2628,10 @@ SOP_QUESTIONS: List[Dict[str, Any]] = [
         "question": "Within what time limit must a formal incident report be submitted following a patient fall, and what visual identifiers must be placed on high fall risk patients?",
         "expected_doc": "sop_fall_prevention.pdf",
         "expected_section": "11.0 Incident Documentation in EMR and Safety Portals",
+        "expected_sections": [
+            {"doc": "sop_fall_prevention.pdf", "section": "11.0 Incident Documentation in EMR and Safety Portals"},
+            {"doc": "sop_fall_prevention.pdf", "section": "6.0 Targeted Interventions for Moderate and High-Risk Patients"}
+        ],
         "expected_answer_snippet": "within 12 hours; Yellow alert wristband, yellow non-skid socks",
         "category": "compound",
         "paraphrased": False
@@ -2800,8 +2812,193 @@ SOP_QUESTIONS: List[Dict[str, Any]] = [
         "question": "What dollar value threshold of inventory loss from cold storage failure triggers escalation to the COO, and how often must Schedule II drug inventory counts occur?",
         "expected_doc": "sop_pharmacy_storage.pdf",
         "expected_section": "12.0 Pharmacy Quality Auditing, Loss Reporting, and Escalation",
+        "expected_sections": [
+            {"doc": "sop_pharmacy_storage.pdf", "section": "12.0 Pharmacy Quality Auditing, Loss Reporting, and Escalation"},
+            {"doc": "sop_pharmacy_storage.pdf", "section": "7.0 Controlled Substance Secure Storage (Schedule II-V)"}
+        ],
         "expected_answer_snippet": "product loss exceeding $10,000; counted every 24 hours",
         "category": "compound",
         "paraphrased": False
+    },
+    # 4 Additional Compound Questions (Total 8 Compound Questions)
+    {
+        "id": "q_med_comp",
+        "question": "What is the lock-out duration after three consecutive failed password attempts on an Automated Dispensing Cabinet, and within what timeframe must a Category I adverse drug event be reported?",
+        "expected_doc": "sop_medication_safety.pdf",
+        "expected_section": "4.0 Automated Dispensing Cabinet (ADC) Lock-Out Constraints",
+        "expected_sections": [
+            {"doc": "sop_medication_safety.pdf", "section": "4.0 Automated Dispensing Cabinet (ADC) Lock-Out Constraints"},
+            {"doc": "sop_medication_safety.pdf", "section": "12.0 Adverse Drug Event Reporting and Root Cause Analysis Escalation"}
+        ],
+        "expected_answer_snippet": "15 minutes; within 2 hours",
+        "category": "compound",
+        "paraphrased": False
+    },
+    {
+        "id": "q_bld_comp",
+        "question": "Within how many minutes must a blood component infusion initiate after release from the blood bank, and what immediate steps must the nurse take if acute transfusion hemolysis is suspected?",
+        "expected_doc": "sop_blood_transfusion.pdf",
+        "expected_section": "3.0 Blood Bank Release and Transport Conditions",
+        "expected_sections": [
+            {"doc": "sop_blood_transfusion.pdf", "section": "3.0 Blood Bank Release and Transport Conditions"},
+            {"doc": "sop_blood_transfusion.pdf", "section": "9.0 Immediate Emergency Reaction Action Steps"}
+        ],
+        "expected_answer_snippet": "within 30 minutes; stop transfusion immediately, disconnect tubing, maintain IV with normal saline",
+        "category": "compound",
+        "paraphrased": False
+    },
+    {
+        "id": "q_con_comp",
+        "question": "How long is a signed surgical consent form valid before requiring re-verification, and who has first legal priority as surrogate decision-maker when an adult lacks capacity?",
+        "expected_doc": "sop_patient_consent.pdf",
+        "expected_section": "5.0 Validity Period and Re-Verification Before Surgery",
+        "expected_sections": [
+            {"doc": "sop_patient_consent.pdf", "section": "5.0 Validity Period and Re-Verification Before Surgery"},
+            {"doc": "sop_patient_consent.pdf", "section": "6.0 Surrogate Decision-Maker Priority Order"}
+        ],
+        "expected_answer_snippet": "30 calendar days; designated healthcare proxy or DPOA",
+        "category": "compound",
+        "paraphrased": False
+    },
+    {
+        "id": "q_wst_comp",
+        "question": "At what fill level must sharps disposal containers be locked and replaced, and within what timeframe must blood and body fluid spills exceeding 50 mL be neutralized?",
+        "expected_doc": "sop_biomedical_waste.pdf",
+        "expected_section": "5.0 Sharps Management and Container Fill Limits",
+        "expected_sections": [
+            {"doc": "sop_biomedical_waste.pdf", "section": "5.0 Sharps Management and Container Fill Limits"},
+            {"doc": "sop_biomedical_waste.pdf", "section": "9.0 Chemical and Biohazard Spill Response Kit Deployment"}
+        ],
+        "expected_answer_snippet": "three-quarters (75%) full; within 15 minutes",
+        "category": "compound",
+        "paraphrased": False
+    },
+    # 8 Keyword-Sensitive Questions (Exact standard codes, thresholds, drug/form names)
+    {
+        "id": "q_kw_01",
+        "question": "What standard specification under ASTM D6319 dictates the barrier performance for medical nitrile examination gloves?",
+        "expected_doc": "sop_infection_control.pdf",
+        "expected_section": "4.0 Personal Protective Equipment: Gloves, Gowns, and Respirators",
+        "expected_answer_snippet": "ASTM D6319",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_02",
+        "question": "Under 49 CFR regulations, how must biohazard regulated medical waste be marked for Department of Transportation transport?",
+        "expected_doc": "sop_biomedical_waste.pdf",
+        "expected_section": "2.0 Regulatory Framework (OSHA, EPA, DOT)",
+        "expected_answer_snippet": "49 CFR",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_03",
+        "question": "What filter pore size between 170 to 260 microns is required in standard blood administration sets?",
+        "expected_doc": "sop_blood_transfusion.pdf",
+        "expected_section": "5.0 Vascular Access, Infusion Sets, and Incompatible Fluids",
+        "expected_answer_snippet": "170 to 260 micron",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_04",
+        "question": "What Dose Error Reduction System (DERS) parameters must be configured on smart infusion pumps for high-alert medications?",
+        "expected_doc": "sop_medication_safety.pdf",
+        "expected_section": "5.0 Smart Infusion Pump Dose Error Reduction System (DERS)",
+        "expected_answer_snippet": "Dose Error Reduction System (DERS)",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_05",
+        "question": "What chest compression rate between 100 to 120 compressions per minute is mandated during adult CPR?",
+        "expected_doc": "sop_emergency_code_response.pdf",
+        "expected_section": "5.0 High-Quality Cardiopulmonary Resuscitation (CPR) Benchmarks",
+        "expected_answer_snippet": "100 to 120 compressions per minute",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_06",
+        "question": "What section 501(r) internal revenue code requirements define eligibility for hospital Financial Assistance Policies?",
+        "expected_doc": "sop_billing_financial.pdf",
+        "expected_section": "7.0 Financial Assistance Policy (FAP) and Poverty Guidelines",
+        "expected_answer_snippet": "Section 501(r)",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_07",
+        "question": "What Fall-Risk-Increasing Drugs (FRIDs) require automated clinical pharmacist alerts upon physician ordering?",
+        "expected_doc": "sop_fall_prevention.pdf",
+        "expected_section": "8.0 Medication Review for Fall-Risk-Increasing Drugs (FRIDs)",
+        "expected_answer_snippet": "Fall-Risk-Increasing Drugs (FRIDs)",
+        "category": "keyword",
+        "paraphrased": False
+    },
+    {
+        "id": "q_kw_08",
+        "question": "What World Health Organization WHO Five Moments framework governs bedside alcohol rub hand disinfection?",
+        "expected_doc": "sop_hand_hygiene.pdf",
+        "expected_section": "3.0 The WHO Five Moments for Hand Hygiene",
+        "expected_answer_snippet": "WHO Five Moments",
+        "category": "keyword",
+        "paraphrased": False
     }
+]
+
+# ============================================================================
+# UNANSWERABLE EVALUATION QUESTIONS (8 questions outside SOP coverage)
+# ============================================================================
+
+UNANSWERABLE_QUESTIONS: List[Dict[str, Any]] = [
+    {
+        "id": "q_unans_01",
+        "question": "What is the hospital policy for transporting service animals into the neonatal intensive care unit (NICU)?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_02",
+        "question": "What are the required cooling water flow rates for magnetic resonance imaging (MRI) superconducting magnets?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_03",
+        "question": "What protocol governs employee parking permit allocations during blizzard and snow emergencies?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_04",
+        "question": "How many days in advance must medical residents submit cafeteria meal vouchers for visiting international scholars?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_05",
+        "question": "What standard operating procedure governs heart-lung transplant organ harvest teams operating inside the helipad hangar?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_06",
+        "question": "What is the hospital lost-and-found cataloging protocol for personal luggage left behind in the pediatric waiting lounge?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_07",
+        "question": "What mileage reimbursement rate applies to clinical research coordinators commuting to off-site archives by personal bicycle?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
+    {
+        "id": "q_unans_08",
+        "question": "How are veterinary pathology specimens segregated and incinerated when received in hospital research animal laboratories?",
+        "category": "unanswerable",
+        "expected_answer": "not_found",
+    },
 ]

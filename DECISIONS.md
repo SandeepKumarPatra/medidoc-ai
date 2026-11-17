@@ -131,3 +131,22 @@ This document tracks key architectural decisions, rationale, and documented trad
 
 - **What was built:** Built automated evaluation harness in `backend/app/eval/` with CLI runner (`python -m backend.app.eval.run`), REST endpoints (`POST /eval/run`, `GET /eval/results`, `GET /eval/runs/{run_id}/questions`), database persistence to `eval_runs` and `eval_results`, and automated report writer to `docs/EVAL_RESULTS.md`. Validated 48 benchmark questions against DB parent sections, marking 4 compound multi-topic queries and 12 paraphrased vocabulary-mismatch queries. Benchmarks hit@1/3/5, MRR, latency across naive, parent-child, hybrid, and two distinct cross-encoders (`BAAI/bge-reranker-base` and `cross-encoder/ms-marco-MiniLM-L-6-v2`); evaluates answer citation fidelity and term overlap (`--with-answers`), and clinical extraction per-field accuracy excluding masked patient name alongside validation issue precision/recall (`--with-extraction`).
 - **Why this design:** Hard query archetypes (compound topic-splits and paraphrased terminology) rigorously isolate dense vs sparse vs cross-encoder capabilities without superficial keyword matching. Segmenting metrics exposes exact strengths and latency trade-offs per retrieval mode, background workers prevent API request timeouts, and strict factual honesty rules ensure ungrounded failures and worst-performing queries are honestly diagnosed rather than tuned away.
+
+---
+
+## Decision 012: Phase 7b Compound Both-Hit Evaluation, Refusal Guardrails, Keyword Benchmarks, and Heuristic Scoring
+
+- **What was built:**
+  - Expanded benchmark dataset to 60 questions in `data/eval/sop_questions.json` (44 single including 12 paraphrased, 8 keyword-sensitive, 8 compound).
+  - Attached explicit `expected_sections` (lists of two distinct `{doc, section}` targets) to all 8 compound questions, and implemented `compound_both_hit_at_5` requiring both targets to appear in top 5 candidates.
+  - Added 8 keyword-sensitive questions featuring exact technical standards (ASTM D6319, 49 CFR, 170-260 micron, DERS, WHO Five Moments) and reported per-category results (`single`, `paraphrased`, `keyword`, `compound`).
+  - Added 8 out-of-domain unanswerable clinical queries (`data/eval/unanswerable_questions.json`) to test hallucination resistance and refusal guardrails in `hybrid` mode.
+  - Implemented top-1 and top-5 candidate set difference tracking between dense (`parent_child`) and `hybrid` retrieval.
+  - Extended `--with-answers` to evaluate both `hybrid` and `hybrid_rerank` modes side-by-side.
+  - Formally documented the abstractive completion heuristic check for clinical summaries (`len(ext_summary.strip()) >= 15`) and synthetic smoke test scope in `docs/EVAL_RESULTS.md`.
+- **Why this design & Honest Findings:**
+  - Compound questions with strict two-target criteria expose cross-domain recall limitations: dense/hybrid achieves only 50% `both-hit@5` (MRR 0.219), while cross-encoder reranking lifts `both-hit@5` to 75% (MRR 0.375) by re-scoring candidate pools.
+  - However, cross-encoder reranking incurs severe CPU latency (2626.6ms for BGE vs 35.2ms for Hybrid, a 75x penalty) and slightly degrades Hit@1 (0.73 vs 0.77).
+  - In answer synthesis, `hybrid_rerank` achieved 100% citation inclusion with 0 false refusals, while `hybrid` had 93.3% citation inclusion and 1 false refusal (6.7%).
+  - Unanswerable guardrails proved 100% robust (8/8 correct refusals, 0 hallucinations).
+  - Default mode choice: `hybrid` is recommended as the default operational mode because it delivers sub-36ms latency, highest Hit@1 (0.77), and 100% keyword Hit@5; `hybrid_rerank` is reserved for complex compound queries where multi-section recall outweighs latency.

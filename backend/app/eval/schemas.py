@@ -20,16 +20,23 @@ class MetricScores(BaseModel):
     hit_at_5: float = Field(0.0, description="Hit rate at rank 5 (0.0 to 1.0)")
     mrr: float = Field(0.0, description="Mean Reciprocal Rank across evaluated questions")
     avg_latency_ms: float = Field(0.0, description="Mean total retrieval latency in milliseconds")
+    compound_both_hit_at_5: Optional[float] = Field(
+        None, description="Share of compound questions where both targets appear in top 5"
+    )
 
 
 class CategoryBreakdown(BaseModel):
     """Categorical performance breakdown across query archetypes."""
 
     all: MetricScores = Field(default_factory=MetricScores, description="Overall metrics across all questions")
-    single: MetricScores = Field(default_factory=MetricScores, description="Metrics across all single-topic questions")
+    single: MetricScores = Field(default_factory=MetricScores, description="Metrics across single-topic questions")
     paraphrased: MetricScores = Field(
         default_factory=MetricScores,
-        description="Metrics across paraphrased single-topic questions (vocabulary mismatch)",
+        description="Metrics across paraphrased questions (vocabulary mismatch)",
+    )
+    keyword: MetricScores = Field(
+        default_factory=MetricScores,
+        description="Metrics across keyword-sensitive questions (exact codes, thresholds, names)",
     )
     compound: MetricScores = Field(
         default_factory=MetricScores,
@@ -47,6 +54,7 @@ class ModeEvalSummary(BaseModel):
     overall: MetricScores = Field(default_factory=MetricScores, description="Overall metrics")
     single: MetricScores = Field(default_factory=MetricScores, description="Single questions metrics")
     paraphrased: MetricScores = Field(default_factory=MetricScores, description="Paraphrased questions metrics")
+    keyword: MetricScores = Field(default_factory=MetricScores, description="Keyword questions metrics")
     compound: MetricScores = Field(default_factory=MetricScores, description="Compound questions metrics")
 
 
@@ -128,20 +136,59 @@ class QuestionEvalItem(BaseModel):
 
     question_id: str = Field(..., description="Question identifier")
     question: Optional[str] = Field(None, description="Original question text")
-    category: str = Field("single", description="Query category: single or compound")
+    category: str = Field("single", description="Query category: single, keyword, or compound")
     paraphrased: bool = Field(False, description="Whether question is paraphrased")
     expected_doc: str = Field(..., description="Expected source document filename")
     expected_section: Optional[str] = Field(None, description="Expected section heading")
+    expected_sections: Optional[List[Dict[str, str]]] = Field(
+        None, description="For compound questions, list of expected target {doc, section} dicts"
+    )
     hit: bool = Field(..., description="Whether expected section was retrieved within top_k")
     rank: Optional[int] = Field(None, description="1-based rank of the first hit (None if not in top_k)")
     reciprocal_rank: float = Field(0.0, description="Reciprocal rank (1/rank or 0.0)")
     latency_ms: float = Field(0.0, description="Query retrieval latency in milliseconds")
+    both_hit_at_5: Optional[bool] = Field(
+        None, description="For compound questions, whether BOTH targets appear in top 5"
+    )
     retrieved_section_titles: List[str] = Field(
         default_factory=list, description="Ordered section headings of retrieved candidates"
     )
     retrieved_docs: List[str] = Field(
         default_factory=list, description="Ordered document filenames of retrieved candidates"
     )
+
+
+class UnanswerableDetail(BaseModel):
+    """Evaluation detail for an individual unanswerable question."""
+
+    question_id: str = Field(..., description="Question identifier")
+    question: str = Field(..., description="Inquiry not covered by hospital SOPs")
+    answer: str = Field(..., description="Generated clinical response")
+    correctly_not_found: bool = Field(..., description="Whether response correctly indicates 'not found' refusal")
+    wrongly_produced_answer: bool = Field(..., description="Whether response wrongly generated an ungrounded answer")
+    generation_ms: float = Field(0.0, description="LLM synthesis latency in milliseconds")
+
+
+class UnanswerableEvalSummary(BaseModel):
+    """Summary metrics for questions unanswerable from the SOP corpus."""
+
+    total_evaluated: int = Field(0, description="Total unanswerable questions evaluated")
+    correctly_not_found_count: int = Field(0, description="Count of correct 'not found' refusals")
+    correctly_not_found_rate: float = Field(0.0, description="Share of correct 'not found' refusals")
+    wrongly_produced_count: int = Field(0, description="Count of wrongly produced / hallucinated answers")
+    wrongly_produced_rate: float = Field(0.0, description="Share of wrongly produced answers")
+    avg_generation_ms: float = Field(0.0, description="Mean token generation latency in milliseconds")
+    details: List[UnanswerableDetail] = Field(default_factory=list, description="Per-question evaluation details")
+
+
+class HybridVsDenseComparison(BaseModel):
+    """Comparative analysis of top retrieved candidates between hybrid and parent_child (dense) search."""
+
+    total_questions: int = Field(0, description="Total questions compared")
+    different_top_1_count: int = Field(0, description="Count of queries where hybrid and parent_child produce different top-1 section")
+    different_top_1_rate: float = Field(0.0, description="Share of queries with differing top-1 section")
+    different_top_5_count: int = Field(0, description="Count of queries where hybrid and parent_child produce different top-5 section sets")
+    different_top_5_rate: float = Field(0.0, description="Share of queries with differing top-5 section sets")
 
 
 class EvalRunRequest(BaseModel):
@@ -178,7 +225,16 @@ class EvalResultsResponse(BaseModel):
 
     runs: List[ModeEvalSummary] = Field(default_factory=list, description="Latest ablation summaries per mode")
     answers: Optional[AnswersEvalSummary] = Field(
-        None, description="Latest grounded QA answer synthesis evaluation metrics"
+        None, description="Latest grounded QA answer synthesis evaluation metrics (hybrid_rerank mode)"
+    )
+    answers_hybrid: Optional[AnswersEvalSummary] = Field(
+        None, description="Latest grounded QA answer synthesis evaluation metrics (hybrid mode)"
+    )
+    unanswerable: Optional[UnanswerableEvalSummary] = Field(
+        None, description="Latest unanswerable questions refusal metrics in hybrid mode"
+    )
+    hybrid_vs_dense: Optional[HybridVsDenseComparison] = Field(
+        None, description="Comparative differences between hybrid and parent_child (dense) search"
     )
     extraction: Optional[ExtractionEvalSummary] = Field(
         None, description="Latest clinical extraction and validation evaluation metrics"

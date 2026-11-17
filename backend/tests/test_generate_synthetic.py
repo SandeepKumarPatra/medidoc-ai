@@ -97,7 +97,7 @@ def test_sop_questions_file_structure():
         questions = json.load(f)
 
     assert isinstance(questions, list), "sop_questions.json must contain a JSON array"
-    assert 36 <= len(questions) <= 50, f"Expected 36-50 questions (3-4 per SOP), got {len(questions)}"
+    assert 36 <= len(questions) <= 80, f"Expected 36-80 questions, got {len(questions)}"
 
     expected_sop_filenames = {
         "sop_infection_control.pdf",
@@ -139,10 +139,10 @@ def test_sop_questions_file_structure():
         doc = q["expected_doc"]
         doc_question_counts[doc] = doc_question_counts.get(doc, 0) + 1
 
-    # Verify every SOP has 3 to 4 questions
+    # Verify every SOP has 4 to 6 questions
     assert len(doc_question_counts) == 12, "All 12 SOPs must be represented in evaluation questions"
     for doc_name, count in doc_question_counts.items():
-        assert 3 <= count <= 4, f"Document {doc_name} must have 3-4 questions, found {count}"
+        assert 4 <= count <= 6, f"Document {doc_name} must have 4-6 questions, found {count}"
 
 
 def test_deliberate_errors_ground_truth(tmp_path: Path):

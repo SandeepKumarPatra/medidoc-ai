@@ -1,0 +1,50 @@
+[
+  {
+    "id": "q_unans_01",
+    "question": "What is the hospital policy for transporting service animals into the neonatal intensive care unit (NICU)?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_02",
+    "question": "What are the required cooling water flow rates for magnetic resonance imaging (MRI) superconducting magnets?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_03",
+    "question": "What protocol governs employee parking permit allocations during blizzard and snow emergencies?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_04",
+    "question": "How many days in advance must medical residents submit cafeteria meal vouchers for visiting international scholars?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_05",
+    "question": "What standard operating procedure governs heart-lung transplant organ harvest teams operating inside the helipad hangar?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_06",
+    "question": "What is the hospital lost-and-found cataloging protocol for personal luggage left behind in the pediatric waiting lounge?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_07",
+    "question": "What mileage reimbursement rate applies to clinical research coordinators commuting to off-site archives by personal bicycle?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  },
+  {
+    "id": "q_unans_08",
+    "question": "How are veterinary pathology specimens segregated and incinerated when received in hospital research animal laboratories?",
+    "category": "unanswerable",
+    "expected_answer": "not_found"
+  }
+]

@@ -27,7 +27,7 @@ from backend.app.config import get_settings
 from backend.app.db.init_db import init_db
 from backend.app.db.models import AuditLog, Child, Document, EvalResult, EvalRun, Extraction, Parent, ValidationIssue
 from backend.app.db.session import SessionLocal, get_db
-from backend.app.eval.metrics import compute_category_breakdown
+from backend.app.eval.metrics import compare_hybrid_vs_dense, compute_category_breakdown
 from backend.app.eval.runner import (
     RERANKER_BGE,
     RERANKER_MINILM,
@@ -35,6 +35,7 @@ from backend.app.eval.runner import (
     run_answers_evaluation,
     run_extraction_evaluation,
     run_retrieval_mode_evaluation,
+    run_unanswerable_evaluation,
 )
 from backend.app.eval.schemas import (
     EvalResultsResponse,
@@ -1149,7 +1150,17 @@ def _background_eval_task(
                     db=db,
                     questions=questions,
                     sample_size=15,
+                    mode="hybrid",
+                )
+                run_answers_evaluation(
+                    db=db,
+                    questions=questions,
+                    sample_size=15,
                     mode="hybrid_rerank",
+                )
+                run_unanswerable_evaluation(
+                    db=db,
+                    mode="hybrid",
                 )
             if with_extraction:
                 run_extraction_evaluation()
@@ -1231,6 +1242,7 @@ def get_eval_results(
         distinct_modes = [r[0] for r in modes_query if r[0]]
 
         mode_summaries: List[ModeEvalSummary] = []
+        eval_items_by_mode: Dict[str, List[QuestionEvalItem]] = {}
         for m in distinct_modes:
             latest_run = (
                 db.query(EvalRun)
@@ -1249,21 +1261,26 @@ def get_eval_results(
             for r in results:
                 q_data = q_map.get(r.question_id, {})
                 rank_val = round(1.0 / r.reciprocal_rank) if r.reciprocal_rank > 0 else None
+                cat = q_data.get("category", "single")
+                both_hit = r.hit if cat == "compound" else None
                 eval_items.append(
                     QuestionEvalItem(
                         question_id=r.question_id,
                         question=q_data.get("question"),
-                        category=q_data.get("category", "single"),
+                        category=cat,
                         paraphrased=bool(q_data.get("paraphrased", False)),
                         expected_doc=r.expected_doc,
                         expected_section=q_data.get("expected_section"),
+                        expected_sections=q_data.get("expected_sections"),
                         hit=r.hit,
                         rank=rank_val,
                         reciprocal_rank=r.reciprocal_rank,
                         latency_ms=r.latency_ms,
+                        both_hit_at_5=both_hit,
                     )
                 )
 
+            eval_items_by_mode[m] = eval_items
             breakdown = compute_category_breakdown(eval_items)
             summary = ModeEvalSummary(
                 run_id=str(latest_run.id),
@@ -1273,6 +1290,7 @@ def get_eval_results(
                 overall=breakdown.all,
                 single=breakdown.single,
                 paraphrased=breakdown.paraphrased,
+                keyword=breakdown.keyword,
                 compound=breakdown.compound,
             )
             mode_summaries.append(summary)
@@ -1287,7 +1305,14 @@ def get_eval_results(
         }
         mode_summaries.sort(key=lambda s: (mode_order.get(s.mode, 99), s.created_at))
 
-        return EvalResultsResponse(runs=mode_summaries)
+        hybrid_vs_dense = None
+        if "parent_child" in eval_items_by_mode and "hybrid" in eval_items_by_mode:
+            hybrid_vs_dense = compare_hybrid_vs_dense(
+                eval_items_by_mode["parent_child"],
+                eval_items_by_mode["hybrid"],
+            )
+
+        return EvalResultsResponse(runs=mode_summaries, hybrid_vs_dense=hybrid_vs_dense)
     except Exception as exc:
         logger.error("Failed to query eval results: %s", exc, exc_info=True)
         raise HTTPException(
@@ -1373,18 +1398,22 @@ def get_eval_run_questions(
                 sec_titles.append(sec_title)
                 doc_names.append(doc_name)
 
+        cat = q_data.get("category", "single")
+        both_hit = r.hit if cat == "compound" else None
         items.append(
             QuestionEvalItem(
                 question_id=r.question_id,
                 question=q_data.get("question"),
-                category=q_data.get("category", "single"),
+                category=cat,
                 paraphrased=bool(q_data.get("paraphrased", False)),
                 expected_doc=r.expected_doc,
                 expected_section=q_data.get("expected_section"),
+                expected_sections=q_data.get("expected_sections"),
                 hit=r.hit,
                 rank=rank_val,
                 reciprocal_rank=r.reciprocal_rank,
                 latency_ms=r.latency_ms,
+                both_hit_at_5=both_hit,
                 retrieved_section_titles=sec_titles,
                 retrieved_docs=doc_names,
             )

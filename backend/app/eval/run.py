@@ -13,6 +13,7 @@ import sys
 from typing import Dict, List, Optional
 
 from backend.app.db.session import SessionLocal
+from backend.app.eval.metrics import compare_hybrid_vs_dense
 from backend.app.eval.runner import (
     RERANKER_BGE,
     RERANKER_MINILM,
@@ -22,12 +23,15 @@ from backend.app.eval.runner import (
     run_answers_evaluation,
     run_extraction_evaluation,
     run_retrieval_mode_evaluation,
+    run_unanswerable_evaluation,
 )
 from backend.app.eval.schemas import (
     AnswersEvalSummary,
     ExtractionEvalSummary,
+    HybridVsDenseComparison,
     ModeEvalSummary,
     QuestionEvalItem,
+    UnanswerableEvalSummary,
 )
 
 logging.basicConfig(
@@ -52,7 +56,13 @@ def parse_args() -> argparse.Namespace:
         "--with-answers",
         action="store_true",
         default=False,
-        help="Evaluate full grounded /ask pipeline on 15 single questions",
+        help="Evaluate full grounded /ask pipeline on 15 single questions (both hybrid and hybrid_rerank)",
+    )
+    parser.add_argument(
+        "--with-unanswerable",
+        action="store_true",
+        default=False,
+        help="Evaluate 8 unanswerable questions for refusal guardrails in hybrid mode",
     )
     parser.add_argument(
         "--with-extraction",
@@ -150,25 +160,63 @@ def main() -> None:
             all_mode_items[summary.mode] = items
 
             print(
-                f"    [Overall] Hit@1: {summary.overall.hit_at_1:.2f} | Hit@3: {summary.overall.hit_at_3:.2f} | "
+                f"    [Overall]  Hit@1: {summary.overall.hit_at_1:.2f} | Hit@3: {summary.overall.hit_at_3:.2f} | "
                 f"Hit@5: {summary.overall.hit_at_5:.2f} | MRR: {summary.overall.mrr:.3f} | Latency: {summary.overall.avg_latency_ms:.1f}ms"
             )
             print(
-                f"    [Single]  Hit@5: {summary.single.hit_at_5:.2f} | MRR: {summary.single.mrr:.3f} (n={summary.single.total_questions})"
+                f"    [Single]   Hit@5: {summary.single.hit_at_5:.2f} | MRR: {summary.single.mrr:.3f} (n={summary.single.total_questions})"
             )
             print(
-                f"    [Paraphr] Hit@5: {summary.paraphrased.hit_at_5:.2f} | MRR: {summary.paraphrased.mrr:.3f} (n={summary.paraphrased.total_questions})"
+                f"    [Paraphr]  Hit@5: {summary.paraphrased.hit_at_5:.2f} | MRR: {summary.paraphrased.mrr:.3f} (n={summary.paraphrased.total_questions})"
             )
             print(
-                f"    [Compound] Hit@5: {summary.compound.hit_at_5:.2f} | MRR: {summary.compound.mrr:.3f} (n={summary.compound.total_questions})"
+                f"    [Keyword]  Hit@5: {summary.keyword.hit_at_5:.2f} | MRR: {summary.keyword.mrr:.3f} (n={summary.keyword.total_questions})"
+            )
+            both_hit_score = (
+                summary.compound.compound_both_hit_at_5
+                if summary.compound.compound_both_hit_at_5 is not None
+                else summary.compound.hit_at_5
+            )
+            print(
+                f"    [Compound] Both-Hit@5: {both_hit_score:.2f} | MRR: {summary.compound.mrr:.3f} (n={summary.compound.total_questions})"
             )
 
-        # 2. Grounded Answer Synthesis Evaluation (--with-answers)
+        # 2. Hybrid vs Dense Comparison
+        hybrid_vs_dense: Optional[HybridVsDenseComparison] = None
+        if "hybrid" in all_mode_items and "parent_child" in all_mode_items:
+            hybrid_vs_dense = compare_hybrid_vs_dense(
+                all_mode_items["parent_child"],
+                all_mode_items["hybrid"],
+            )
+            print("\n" + "=" * 80)
+            print("HYBRID VS DENSE (PARENT-CHILD) COMPARISON")
+            print("=" * 80)
+            print(f"Total questions compared: {hybrid_vs_dense.total_questions}")
+            print(f"Different Top-1 Section : {hybrid_vs_dense.different_top_1_count} ({hybrid_vs_dense.different_top_1_rate * 100:.1f}%)")
+            print(f"Different Top-5 Set     : {hybrid_vs_dense.different_top_5_count} ({hybrid_vs_dense.different_top_5_rate * 100:.1f}%)")
+
+        # 3. Grounded Answer Synthesis Evaluation (--with-answers)
         answers_summary: Optional[AnswersEvalSummary] = None
+        answers_hybrid_summary: Optional[AnswersEvalSummary] = None
         if args.with_answers:
             print("\n" + "=" * 80)
             print(f"STARTING GROUNDED ANSWER EVALUATION (--with-answers, n={args.sample_size})")
             print("=" * 80)
+
+            print("\n--> [Mode: hybrid] Evaluating grounded QA answers...")
+            answers_hybrid_summary = run_answers_evaluation(
+                db=db,
+                questions=questions,
+                sample_size=args.sample_size,
+                mode="hybrid",
+                delay_sec=1.0,
+            )
+            print(f"    - Citation inclusion rate: {answers_hybrid_summary.citation_inclusion_rate * 100:.1f}%")
+            print(f"    - Cited source term overlap: {answers_hybrid_summary.key_term_overlap_rate * 100:.1f}%")
+            print(f"    - Wrong 'not found' refusals: {answers_hybrid_summary.wrong_not_found_count} ({answers_hybrid_summary.wrong_not_found_rate * 100:.1f}%)")
+            print(f"    - Average generation latency: {answers_hybrid_summary.avg_generation_ms:.1f} ms")
+
+            print("\n--> [Mode: hybrid_rerank] Evaluating grounded QA answers...")
             answers_summary = run_answers_evaluation(
                 db=db,
                 questions=questions,
@@ -176,13 +224,28 @@ def main() -> None:
                 mode="hybrid_rerank",
                 delay_sec=1.0,
             )
-            print(f"--> Evaluated {answers_summary.total_evaluated} answers:")
             print(f"    - Citation inclusion rate: {answers_summary.citation_inclusion_rate * 100:.1f}%")
             print(f"    - Cited source term overlap: {answers_summary.key_term_overlap_rate * 100:.1f}%")
             print(f"    - Wrong 'not found' refusals: {answers_summary.wrong_not_found_count} ({answers_summary.wrong_not_found_rate * 100:.1f}%)")
             print(f"    - Average generation latency: {answers_summary.avg_generation_ms:.1f} ms")
 
-        # 3. Clinical Extraction Evaluation (--with-extraction)
+        # 4. Unanswerable Questions Evaluation
+        unanswerable_summary: Optional[UnanswerableEvalSummary] = None
+        if args.with_answers or args.with_unanswerable:
+            print("\n" + "=" * 80)
+            print("STARTING UNANSWERABLE QUESTIONS EVALUATION (hybrid mode)")
+            print("=" * 80)
+            unanswerable_summary = run_unanswerable_evaluation(
+                db=db,
+                mode="hybrid",
+                delay_sec=1.0,
+            )
+            print(f"--> Evaluated {unanswerable_summary.total_evaluated} unanswerable questions:")
+            print(f"    - Correctly Refused ('not found'): {unanswerable_summary.correctly_not_found_count} / {unanswerable_summary.total_evaluated} ({unanswerable_summary.correctly_not_found_rate * 100:.1f}%)")
+            print(f"    - Wrongly Produced Answer        : {unanswerable_summary.wrongly_produced_count} / {unanswerable_summary.total_evaluated} ({unanswerable_summary.wrongly_produced_rate * 100:.1f}%)")
+            print(f"    - Mean Latency                   : {unanswerable_summary.avg_generation_ms:.1f} ms")
+
+        # 5. Clinical Extraction Evaluation (--with-extraction)
         extraction_summary: Optional[ExtractionEvalSummary] = None
         if args.with_extraction:
             print("\n" + "=" * 80)
@@ -197,15 +260,18 @@ def main() -> None:
             print(f"    - Rule Validation Recall   : {extraction_summary.validation_recall * 100:.1f}%")
             print(f"    - Rule Validation F1       : {extraction_summary.validation_f1:.3f}")
 
-        # 4. Identify 10 Worst-Performing Questions
+        # 6. Identify 10 Worst-Performing Questions
         worst_questions = identify_worst_questions(all_mode_items, limit=10)
 
-        # 5. Generate and write EVAL_RESULTS.md
+        # 7. Generate and write EVAL_RESULTS.md
         out_path = Path(args.output)
         generate_evaluation_markdown(
             mode_summaries=mode_summaries,
             worst_questions=worst_questions,
             answers_summary=answers_summary,
+            answers_hybrid_summary=answers_hybrid_summary,
+            unanswerable_summary=unanswerable_summary,
+            hybrid_vs_dense=hybrid_vs_dense,
             extraction_summary=extraction_summary,
             output_path=out_path,
         )
