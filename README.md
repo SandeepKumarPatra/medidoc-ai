@@ -20,7 +20,7 @@ MediDoc AI is an evidence-based clinical document and hospital policy assistant 
 | **Phase 4c** | Test Isolation & Honesty | **Done** | Ephemeral test database (`medidoc_test`), 100-token child chunks (2.01x ratio), extraction honesty clauses. |
 | **Phase 5** | Frontend Workspace Screens | **Planned** | React + Vite workspace screens for Document Extraction, Policy Q&A, and Knowledge Base management. |
 | **Phase 6** | Frontend Dashboards | **Planned** | Overview, Evaluation, and Audit & Privacy dashboards rendered with Recharts. |
-| **Phase 7** | Evaluation Harness | **Planned** | Automated evaluation runner across all four retrieval modes comparing hit@5, MRR, and extraction accuracy. |
+| **Phase 7** | Evaluation Harness | **Done** | Automated evaluation runner across all retrieval modes, BGE vs MiniLM reranker ablation, grounded answer evaluation, clinical extraction scoring, and [EVAL_RESULTS.md](file:///d:/GENaiMedicalProject/medidoc-ai/docs/EVAL_RESULTS.md). |
 | **Phase 8** | Full Packaging & Demo | **In progress** | Complete Docker Compose orchestration, comprehensive documentation, and demo walkthrough. |
 
 ---

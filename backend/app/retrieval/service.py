@@ -19,7 +19,7 @@ from backend.app.db.session import SessionLocal
 from backend.app.retrieval.dense import dense_search
 from backend.app.retrieval.expansion import expand_to_parents
 from backend.app.retrieval.fusion import reciprocal_rank_fusion
-from backend.app.retrieval.rerank import rerank_candidates
+from backend.app.retrieval.rerank import get_cross_encoder, rerank_candidates
 from backend.app.retrieval.schemas import RetrievalChunk, RetrievalResponse
 from backend.app.retrieval.sparse import sparse_search
 
@@ -34,6 +34,7 @@ def retrieve(
     mode: str = "hybrid_rerank",
     top_k: int = 5,
     db: Optional[Session] = None,
+    reranker_model: Optional[str] = None,
 ) -> RetrievalResponse:
     """Execute multi-strategy document retrieval.
 
@@ -42,6 +43,7 @@ def retrieve(
         mode: Retrieval strategy ('naive', 'parent_child', 'hybrid', 'hybrid_rerank').
         top_k: Number of results to return.
         db: Optional active SQLAlchemy database session. If None, manages its own session.
+        reranker_model: Optional model name to override the default reranker model.
 
     Returns:
         RetrievalResponse with scored chunks and per-stage latency breakdown.
@@ -78,6 +80,7 @@ def retrieve(
                         page_end=child.page_end,
                         chunk_type="child",
                         mode=mode,
+                        metadata={"parent_id": str(child.parent_id)},
                     )
                 )
 
@@ -138,9 +141,11 @@ def retrieve(
             # Rerank top RERANK_CANDIDATES (config, default 20) fused candidates using cross-encoder
             rerank_limit = settings.rerank_candidates
             rerank_pool = fused_candidates[:rerank_limit]
+            cross_enc = get_cross_encoder(reranker_model) if reranker_model else None
             reranked_candidates, rerank_ms, rerank_text_chars = rerank_candidates(
                 question=question,
                 candidates=rerank_pool,
+                cross_encoder=cross_enc,
             )
             timings["rerank_ms"] = round(rerank_ms, 2)
             timings["rerank_text_chars"] = rerank_text_chars

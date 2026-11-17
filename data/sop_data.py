@@ -2371,21 +2371,24 @@ SOP_DEFINITIONS: Dict[str, Dict[str, Any]] = {
 # EVALUATION QUESTIONS FOR SOPS (48 questions, 4 per SOP)
 # ============================================================================
 
-SOP_QUESTIONS: List[Dict[str, str]] = [
-    # SOP 1: Infection Control
+SOP_QUESTIONS: List[Dict[str, Any]] = [
     {
         "id": "q_inf_01",
-        "question": "What is the minimum number of air changes per hour mandated for an airborne infection isolation room?",
+        "question": "How many fresh air ventilation cycles does a negative pressure contagion ward need every sixty minutes?",
         "expected_doc": "sop_infection_control.pdf",
         "expected_section": "6.0 Airborne Infection Isolation Room (AIIR) Specifications",
-        "expected_answer_snippet": "≥12 air changes per hour",
+        "expected_answer_snippet": "\u226512 air changes per hour",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_inf_02",
-        "question": "How long must bleach disinfectant solution remain wet on surfaces during terminal decontamination?",
+        "question": "What is the contact dwelling duration required for sodium hypochlorite wipe-downs when cleaning rooms after patient discharge?",
         "expected_doc": "sop_infection_control.pdf",
         "expected_section": "7.0 Environmental Decontamination & Disinfection Timelines",
         "expected_answer_snippet": "10 minutes for bleach",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_inf_03",
@@ -2393,21 +2396,26 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_infection_control.pdf",
         "expected_section": "12.0 Clinical Governance, Audit, and Breach Escalation",
         "expected_answer_snippet": "within 4 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_inf_04",
-        "question": "What specific glove standard is required for standard examination barrier precautions?",
+        "question": "What specific glove standard is required for standard examination barrier precautions, and within what timeframe must an outbreak cluster be reported to the Chief Medical Officer?",
         "expected_doc": "sop_infection_control.pdf",
         "expected_section": "4.0 Personal Protective Equipment: Gloves, Gowns, and Respirators",
-        "expected_answer_snippet": "ASTM D6319",
+        "expected_answer_snippet": "ASTM D6319; within 4 hours",
+        "category": "compound",
+        "paraphrased": False
     },
-    # SOP 2: Discharge Process
     {
         "id": "q_dis_01",
-        "question": "What is the daily target cutoff time for patient departures from inpatient beds?",
+        "question": "By what time in the morning should patients vacate their rooms on the day they go home?",
         "expected_doc": "sop_discharge_process.pdf",
         "expected_section": "1.0 Objective and Target Departure Timelines",
         "expected_answer_snippet": "11:00 AM",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_dis_02",
@@ -2415,35 +2423,44 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_discharge_process.pdf",
         "expected_section": "3.0 Attending Physician Clinical Sign-Off Requirements",
         "expected_answer_snippet": "within 24 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_dis_03",
         "question": "What LACE score threshold mandates a telephone wellness check within 48 to 72 hours?",
         "expected_doc": "sop_discharge_process.pdf",
         "expected_section": "10.0 Post-Discharge Telephonic Follow-Up (LACE Criteria)",
-        "expected_answer_snippet": "LACE score ≥ 10",
+        "expected_answer_snippet": "LACE score \u2265 10",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_dis_04",
-        "question": "Who is notified when a discharge is stalled more than 180 minutes past scheduled release?",
+        "question": "Who is notified when a discharge is stalled more than 180 minutes past scheduled release, and what LACE score threshold mandates a telephone wellness check?",
         "expected_doc": "sop_discharge_process.pdf",
         "expected_section": "12.0 Quality Metrics, Readmission Audit, and Delay Escalation",
-        "expected_answer_snippet": "Inpatient Bed Management Director",
+        "expected_answer_snippet": "Inpatient Bed Management Director; LACE score \u2265 10",
+        "category": "compound",
+        "paraphrased": False
     },
-    # SOP 3: Billing & Financial
     {
         "id": "q_bil_01",
         "question": "What is the maximum allowable window for departments to record clinical charges after care is provided?",
         "expected_doc": "sop_billing_financial.pdf",
         "expected_section": "3.0 Point-of-Care Charge Capture & Timelines",
         "expected_answer_snippet": "within 24 hours of service",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_bil_02",
-        "question": "What income threshold relative to the Federal Poverty Level qualifies an uninsured patient for a complete write-off?",
+        "question": "At what poverty earnings cap is medical debt 100 percent forgiven for self-pay individuals?",
         "expected_doc": "sop_billing_financial.pdf",
         "expected_section": "7.0 Financial Assistance Policy (FAP) and Poverty Guidelines",
-        "expected_answer_snippet": "≤ 250% of the Federal Poverty Level",
+        "expected_answer_snippet": "\u2264 250% of the Federal Poverty Level",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_bil_03",
@@ -2451,21 +2468,26 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_billing_financial.pdf",
         "expected_section": "10.0 Dispute Resolution and Charge Grievance Process",
         "expected_answer_snippet": "Director of Revenue Cycle",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_bil_04",
         "question": "What is the hospital target percentage for first-pass clean insurance claims?",
         "expected_doc": "sop_billing_financial.pdf",
         "expected_section": "1.0 Purpose and Revenue Cycle Integrity",
-        "expected_answer_snippet": "clean claim rate target is ≥ 96%",
+        "expected_answer_snippet": "clean claim rate target is \u2265 96%",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 4: Medication Safety
     {
         "id": "q_med_01",
-        "question": "What is the highest permitted continuous regular insulin infusion rate before requiring specialist authorization?",
+        "question": "At what dosage level does a nonstop intravenous blood sugar drip trigger an endocrinologist consult?",
         "expected_doc": "sop_medication_safety.pdf",
         "expected_section": "6.0 Intravenous Insulin Protocol and Glycemic Monitoring",
         "expected_answer_snippet": "10 units/hour",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_med_02",
@@ -2473,6 +2495,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_medication_safety.pdf",
         "expected_section": "7.0 Anticoagulation Management: Heparin and Low Molecular Weight Heparin",
         "expected_answer_snippet": "60 to 85 seconds",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_med_03",
@@ -2480,6 +2504,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_medication_safety.pdf",
         "expected_section": "9.0 Personal Protective Equipment: Chemotherapy Glove Handling",
         "expected_answer_snippet": "ASTM D6978",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_med_04",
@@ -2487,14 +2513,17 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_medication_safety.pdf",
         "expected_section": "12.0 Adverse Drug Event Reporting and Root Cause Analysis Escalation",
         "expected_answer_snippet": "within 60 minutes",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 5: Patient Consent
     {
         "id": "q_con_01",
-        "question": "For how many days is a signed informed consent form considered valid before an elective operation?",
+        "question": "How many calendar days can lapse before surgical authorization paperwork expires prior to a scheduled procedure?",
         "expected_doc": "sop_patient_consent.pdf",
         "expected_section": "5.0 Validity Period and Re-Verification Before Surgery",
         "expected_answer_snippet": "maximum of 30 days",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_con_02",
@@ -2502,6 +2531,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_patient_consent.pdf",
         "expected_section": "6.0 Surrogate Decision-Maker Priority Order",
         "expected_answer_snippet": "Legal spouse",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_con_03",
@@ -2509,6 +2540,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_patient_consent.pdf",
         "expected_section": "12.0 Ethical Disputes, Refusals, and Legal Risk Escalation",
         "expected_answer_snippet": "within 6 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_con_04",
@@ -2516,21 +2549,26 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_patient_consent.pdf",
         "expected_section": "8.0 Emergency Treatment Exception Protocol",
         "expected_answer_snippet": "within 15 minutes",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 6: Hand Hygiene
     {
         "id": "q_hyg_01",
         "question": "What is the recommended volume of alcohol rub to apply when sanitizing hands between patient contacts?",
         "expected_doc": "sop_hand_hygiene.pdf",
         "expected_section": "4.0 Alcohol-Based Hand Rub (ABHR) Technique and Volume",
         "expected_answer_snippet": "3 to 5 mL",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_hyg_02",
-        "question": "How long should staff scrub with soap and water when managing spore-forming pathogens like C. diff?",
+        "question": "What duration must clinicians lather at the sink when caring for someone infected with Clostridioides?",
         "expected_doc": "sop_hand_hygiene.pdf",
         "expected_section": "5.0 Handwashing with Antimicrobial Soap and Running Water",
         "expected_answer_snippet": "40 to 60 seconds",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_hyg_03",
@@ -2538,6 +2576,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_hand_hygiene.pdf",
         "expected_section": "8.0 Fingernail Standards, Jewelry, and Skin Integrity Guidelines",
         "expected_answer_snippet": "0.25 inches (6 mm)",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_hyg_04",
@@ -2545,14 +2585,17 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_hand_hygiene.pdf",
         "expected_section": "12.0 Corrective Action Plans and Leadership Escalation",
         "expected_answer_snippet": "scoring < 85% compliance",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 7: Fall Prevention
     {
         "id": "q_fal_01",
-        "question": "What Morse Fall Scale score marks a patient as being at high risk for falling?",
+        "question": "What point cutoff on the bed-accident assessment scale places an individual in the greatest danger bracket?",
         "expected_doc": "sop_fall_prevention.pdf",
         "expected_section": "3.0 Morse Fall Scale (MFS) Scoring Methodology",
-        "expected_answer_snippet": "High risk (≥ 51)",
+        "expected_answer_snippet": "High risk (\u2265 51)",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_fal_02",
@@ -2560,6 +2603,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_fall_prevention.pdf",
         "expected_section": "10.0 Post-Fall Neurological Checks and Emergency Head Imaging",
         "expected_answer_snippet": "within 60 minutes",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_fal_03",
@@ -2567,35 +2612,44 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_fall_prevention.pdf",
         "expected_section": "6.0 Targeted Interventions for Moderate and High-Risk Patients",
         "expected_answer_snippet": "Yellow alert wristband, yellow non-skid socks",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_fal_04",
-        "question": "Within what time limit must a formal incident report be submitted following a patient fall?",
+        "question": "Within what time limit must a formal incident report be submitted following a patient fall, and what visual identifiers must be placed on high fall risk patients?",
         "expected_doc": "sop_fall_prevention.pdf",
         "expected_section": "11.0 Incident Documentation in EMR and Safety Portals",
-        "expected_answer_snippet": "within 12 hours",
+        "expected_answer_snippet": "within 12 hours; Yellow alert wristband, yellow non-skid socks",
+        "category": "compound",
+        "paraphrased": False
     },
-    # SOP 8: Blood Transfusion
     {
         "id": "q_bld_01",
         "question": "How long is a patient blood type and screen specimen valid before requiring a redraw?",
         "expected_doc": "sop_blood_transfusion.pdf",
         "expected_section": "2.0 Pre-Transfusion Testing and Sample Validity",
         "expected_answer_snippet": "maximum 72 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_bld_02",
-        "question": "What is the maximum time allowed for a packed red blood cell unit to finish infusing once started?",
+        "question": "How long can blood stay out of the fridge during a transfusion before administration must finish?",
         "expected_doc": "sop_blood_transfusion.pdf",
         "expected_section": "6.0 Rate of Administration and 15-Minute Observation Rule",
         "expected_answer_snippet": "complete within 4 hours",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_bld_03",
         "question": "What degree of temperature elevation during transfusion is considered a clinical trigger for stopping the unit?",
         "expected_doc": "sop_blood_transfusion.pdf",
         "expected_section": "8.0 Recognition of Acute Transfusion Reactions (AHTR, TRALI, TACO)",
-        "expected_answer_snippet": "increase ≥ 1.0°C (1.8°F)",
+        "expected_answer_snippet": "increase \u2265 1.0\u00b0C (1.8\u00b0F)",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_bld_04",
@@ -2603,21 +2657,26 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_blood_transfusion.pdf",
         "expected_section": "12.0 Hemovigilance Committee Review and State Reporting Escalation",
         "expected_answer_snippet": "within 15 minutes",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 9: Emergency Code Response
     {
         "id": "q_emr_01",
         "question": "What is the required chest compression rate during adult CPR according to hospital standards?",
         "expected_doc": "sop_emergency_code_response.pdf",
         "expected_section": "5.0 High-Quality Cardiopulmonary Resuscitation (CPR) Benchmarks",
         "expected_answer_snippet": "100 to 120 chest compressions per minute",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_emr_02",
-        "question": "How quickly is the hospital Rapid Response Team required to arrive at a Code Blue bedside?",
+        "question": "How many minutes do emergency resuscitation clinicians have to reach an inpatient whose heart or breathing stopped?",
         "expected_doc": "sop_emergency_code_response.pdf",
         "expected_section": "4.0 Response Time Standards and Overhead Announcement",
         "expected_answer_snippet": "on scene within 3 minutes",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_emr_03",
@@ -2625,6 +2684,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_emergency_code_response.pdf",
         "expected_section": "9.0 Emergency Crash Cart Maintenance and Lock Auditing",
         "expected_answer_snippet": "daily by 08:00 AM",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_emr_04",
@@ -2632,21 +2693,26 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_emergency_code_response.pdf",
         "expected_section": "11.0 Resuscitation Flow-Sheet Documentation in EMR",
         "expected_answer_snippet": "within 60 minutes post-event",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 10: Patient Identification
     {
         "id": "q_pid_01",
         "question": "What pieces of patient information are prohibited from being used as identifiers?",
         "expected_doc": "sop_patient_identification.pdf",
         "expected_section": "2.0 Approved Patient Identifiers and Prohibited Proxies",
         "expected_answer_snippet": "Room number and bed location are strictly prohibited",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_pid_02",
-        "question": "What clinical meaning does a purple wristband indicate on an inpatient?",
+        "question": "What end-of-life status is designated by putting a violet bracelet on a hospitalized person?",
         "expected_doc": "sop_patient_identification.pdf",
         "expected_section": "4.0 Color-Coded Alert Wristband Conventions",
         "expected_answer_snippet": "Purple indicates Do Not Resuscitate (DNR)",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_pid_03",
@@ -2654,6 +2720,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_patient_identification.pdf",
         "expected_section": "10.0 Damaged, Defaced, or Missing Band Replacement Workflow",
         "expected_answer_snippet": "within 10 minutes",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_pid_04",
@@ -2661,14 +2729,17 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_patient_identification.pdf",
         "expected_section": "12.0 Near-Miss Reporting, Safety Review, and Incident Escalation",
         "expected_answer_snippet": "within 2 hours",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 11: Biomedical Waste
     {
         "id": "q_wst_01",
-        "question": "At what fill level must sharps containers be sealed and replaced?",
+        "question": "When does a puncture-resistant syringe box need to be locked shut and swapped out?",
         "expected_doc": "sop_biomedical_waste.pdf",
         "expected_section": "5.0 Sharps Management and Container Fill Limits",
         "expected_answer_snippet": "when 3/4 full",
+        "category": "single",
+        "paraphrased": True
     },
     {
         "id": "q_wst_02",
@@ -2676,6 +2747,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_biomedical_waste.pdf",
         "expected_section": "7.0 Central Holding Area Storage Times and Temperature Controls",
         "expected_answer_snippet": "holding room is 48 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_wst_03",
@@ -2683,6 +2756,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_biomedical_waste.pdf",
         "expected_section": "8.0 PPE Requirements: Heavy-Duty Utility Glove Standards",
         "expected_answer_snippet": "Heavy-duty 14-mil nitrile utility gloves",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_wst_04",
@@ -2690,14 +2765,17 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_biomedical_waste.pdf",
         "expected_section": "10.0 Occupational Exposure Protocol (Sharps & Splashes)",
         "expected_answer_snippet": "for PEP within 2 hours",
+        "category": "single",
+        "paraphrased": False
     },
-    # SOP 12: Pharmacy Storage
     {
         "id": "q_phr_01",
         "question": "What is the mandatory temperature range for hospital refrigerated pharmaceutical cold storage?",
         "expected_doc": "sop_pharmacy_storage.pdf",
         "expected_section": "2.0 Standard Temperature Range Specifications",
-        "expected_answer_snippet": "2°C to 8°C (36°F to 46°F)",
+        "expected_answer_snippet": "2\u00b0C to 8\u00b0C (36\u00b0F to 46\u00b0F)",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_phr_02",
@@ -2705,6 +2783,8 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_pharmacy_storage.pdf",
         "expected_section": "3.0 Continuous Monitoring and NIST Data Logger Calibration",
         "expected_answer_snippet": "record temperatures every 15 minutes",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_phr_03",
@@ -2712,12 +2792,16 @@ SOP_QUESTIONS: List[Dict[str, str]] = [
         "expected_doc": "sop_pharmacy_storage.pdf",
         "expected_section": "7.0 Controlled Substance Secure Storage (Schedule II-V)",
         "expected_answer_snippet": "counted every 24 hours",
+        "category": "single",
+        "paraphrased": False
     },
     {
         "id": "q_phr_04",
-        "question": "What dollar value threshold of inventory loss from cold storage failure triggers escalation to the COO?",
+        "question": "What dollar value threshold of inventory loss from cold storage failure triggers escalation to the COO, and how often must Schedule II drug inventory counts occur?",
         "expected_doc": "sop_pharmacy_storage.pdf",
         "expected_section": "12.0 Pharmacy Quality Auditing, Loss Reporting, and Escalation",
-        "expected_answer_snippet": "product loss exceeding $10,000",
-    },
+        "expected_answer_snippet": "product loss exceeding $10,000; counted every 24 hours",
+        "category": "compound",
+        "paraphrased": False
+    }
 ]

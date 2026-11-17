@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Literal, Optional
 
 import torch
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, text
@@ -25,8 +25,24 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import get_settings
 from backend.app.db.init_db import init_db
-from backend.app.db.models import AuditLog, Child, Document, Extraction, Parent, ValidationIssue
-from backend.app.db.session import get_db
+from backend.app.db.models import AuditLog, Child, Document, EvalResult, EvalRun, Extraction, Parent, ValidationIssue
+from backend.app.db.session import SessionLocal, get_db
+from backend.app.eval.metrics import compute_category_breakdown
+from backend.app.eval.runner import (
+    RERANKER_BGE,
+    RERANKER_MINILM,
+    load_sop_questions,
+    run_answers_evaluation,
+    run_extraction_evaluation,
+    run_retrieval_mode_evaluation,
+)
+from backend.app.eval.schemas import (
+    EvalResultsResponse,
+    EvalRunRequest,
+    EvalRunResponse,
+    ModeEvalSummary,
+    QuestionEvalItem,
+)
 from backend.app.extraction.extractor import extract_clinical_document
 from backend.app.extraction.schema import ClinicalExtraction
 from backend.app.extraction.validator import ValidationIssueSchema, validate_extraction
@@ -1102,4 +1118,278 @@ def get_extraction_detail(
         json_result=extraction.json_result,
         validation_issues=validation_issues,
     )
+
+
+# ==============================================================================
+# Phase 7: Evaluation Harness Endpoints
+# ==============================================================================
+
+def _background_eval_task(
+    run_configs: List[Tuple[str, Optional[str], Optional[str], uuid.UUID]],
+    with_answers: bool,
+    with_extraction: bool,
+) -> None:
+    """Background worker for executing evaluation benchmark runs."""
+    with SessionLocal() as db:
+        try:
+            questions = load_sop_questions()
+            for mode, reranker, note, r_uuid in run_configs:
+                run_retrieval_mode_evaluation(
+                    db=db,
+                    questions=questions,
+                    mode=mode,
+                    top_k=5,
+                    reranker_model=reranker,
+                    save_to_db=True,
+                    notes=note,
+                    run_id=r_uuid,
+                )
+            if with_answers:
+                run_answers_evaluation(
+                    db=db,
+                    questions=questions,
+                    sample_size=15,
+                    mode="hybrid_rerank",
+                )
+            if with_extraction:
+                run_extraction_evaluation()
+        except Exception as exc:
+            logger.error("Background evaluation task failed: %s", exc, exc_info=True)
+
+
+@app.post(
+    "/eval/run",
+    response_model=EvalRunResponse,
+    summary="Trigger asynchronous evaluation run across retrieval modes",
+    tags=["Evaluation"],
+)
+def run_evaluation(
+    request: Optional[EvalRunRequest] = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db),
+) -> EvalRunResponse:
+    """Launch evaluation benchmark across configured retrieval modes in the background."""
+    req = request or EvalRunRequest()
+    requested_modes = req.modes
+
+    configs: List[Tuple[str, Optional[str], Optional[str], uuid.UUID]] = []
+    if "all" in requested_modes:
+        configs = [
+            ("naive", None, "Naive child vector search", uuid.uuid4()),
+            ("parent_child", None, "Dense child search with parent expansion", uuid.uuid4()),
+            ("hybrid", None, "Dense + sparse full-text with RRF (k=60)", uuid.uuid4()),
+            ("hybrid_rerank", RERANKER_BGE, "Hybrid with BAAI/bge-reranker-base", uuid.uuid4()),
+            ("hybrid_rerank", RERANKER_MINILM, "Hybrid with cross-encoder/ms-marco-MiniLM-L-6-v2", uuid.uuid4()),
+        ]
+    else:
+        for m in requested_modes:
+            if m == "naive":
+                configs.append(("naive", None, req.notes or "Naive child vector search", uuid.uuid4()))
+            elif m == "parent_child":
+                configs.append(("parent_child", None, req.notes or "Dense child search with parent expansion", uuid.uuid4()))
+            elif m == "hybrid":
+                configs.append(("hybrid", None, req.notes or "Dense + sparse full-text with RRF (k=60)", uuid.uuid4()))
+            elif m in ("hybrid_rerank", "hybrid_rerank_bge"):
+                configs.append(("hybrid_rerank", RERANKER_BGE, req.notes or "Hybrid with BAAI/bge-reranker-base", uuid.uuid4()))
+            elif m in ("hybrid_rerank_minilm", "hybrid_rerank_msmarco"):
+                configs.append(("hybrid_rerank", RERANKER_MINILM, req.notes or "Hybrid with cross-encoder/ms-marco-MiniLM-L-6-v2", uuid.uuid4()))
+
+    if not configs:
+        configs = [("hybrid_rerank", RERANKER_BGE, "Hybrid with BAAI/bge-reranker-base", uuid.uuid4())]
+
+    run_ids_map: Dict[str, str] = {}
+    for m, r, _, r_uuid in configs:
+        label = "hybrid_rerank_minilm" if r == RERANKER_MINILM else ("hybrid_rerank" if r == RERANKER_BGE else m)
+        run_ids_map[label] = str(r_uuid)
+
+    primary_run_id = str(configs[0][3])
+    background_tasks.add_task(_background_eval_task, configs, req.with_answers, req.with_extraction)
+
+    return EvalRunResponse(
+        run_id=primary_run_id,
+        run_ids=run_ids_map,
+        status="started",
+        message=f"Evaluation launched for {len(configs)} mode(s) in background.",
+    )
+
+
+@app.get(
+    "/eval/results",
+    response_model=EvalResultsResponse,
+    summary="Get latest evaluation results and ablation metrics per mode",
+    tags=["Evaluation"],
+)
+def get_eval_results(
+    db: Session = Depends(get_db),
+) -> EvalResultsResponse:
+    """Retrieve the latest evaluation benchmark run and ablation metrics per retrieval mode."""
+    try:
+        questions = load_sop_questions()
+        q_map = {q["id"]: q for q in questions}
+
+        modes_query = db.query(EvalRun.mode).distinct().all()
+        distinct_modes = [r[0] for r in modes_query if r[0]]
+
+        mode_summaries: List[ModeEvalSummary] = []
+        for m in distinct_modes:
+            latest_run = (
+                db.query(EvalRun)
+                .filter(EvalRun.mode == m)
+                .order_by(EvalRun.created_at.desc())
+                .first()
+            )
+            if not latest_run:
+                continue
+
+            results = db.query(EvalResult).filter(EvalResult.run_id == latest_run.id).all()
+            if not results:
+                continue
+
+            eval_items: List[QuestionEvalItem] = []
+            for r in results:
+                q_data = q_map.get(r.question_id, {})
+                rank_val = round(1.0 / r.reciprocal_rank) if r.reciprocal_rank > 0 else None
+                eval_items.append(
+                    QuestionEvalItem(
+                        question_id=r.question_id,
+                        question=q_data.get("question"),
+                        category=q_data.get("category", "single"),
+                        paraphrased=bool(q_data.get("paraphrased", False)),
+                        expected_doc=r.expected_doc,
+                        expected_section=q_data.get("expected_section"),
+                        hit=r.hit,
+                        rank=rank_val,
+                        reciprocal_rank=r.reciprocal_rank,
+                        latency_ms=r.latency_ms,
+                    )
+                )
+
+            breakdown = compute_category_breakdown(eval_items)
+            summary = ModeEvalSummary(
+                run_id=str(latest_run.id),
+                mode=latest_run.mode,
+                created_at=latest_run.created_at.isoformat() if latest_run.created_at else "",
+                notes=latest_run.notes,
+                overall=breakdown.all,
+                single=breakdown.single,
+                paraphrased=breakdown.paraphrased,
+                compound=breakdown.compound,
+            )
+            mode_summaries.append(summary)
+
+        mode_order = {
+            "naive": 1,
+            "parent_child": 2,
+            "hybrid": 3,
+            "hybrid_rerank": 4,
+            "hybrid_rerank_bge": 4,
+            "hybrid_rerank_minilm": 5,
+        }
+        mode_summaries.sort(key=lambda s: (mode_order.get(s.mode, 99), s.created_at))
+
+        return EvalResultsResponse(runs=mode_summaries)
+    except Exception as exc:
+        logger.error("Failed to query eval results: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query evaluation results: {exc}",
+        )
+
+
+@app.get(
+    "/eval/runs/{run_id}/questions",
+    response_model=List[QuestionEvalItem],
+    summary="Get per-question retrieval performance details for an evaluation run",
+    tags=["Evaluation"],
+)
+def get_eval_run_questions(
+    run_id: str,
+    db: Session = Depends(get_db),
+) -> List[QuestionEvalItem]:
+    """Retrieve per-question retrieval hit, rank, and retrieved section titles for a given run_id."""
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Invalid eval run UUID format: '{run_id}'",
+        )
+
+    eval_run = db.query(EvalRun).filter(EvalRun.id == run_uuid).first()
+    if not eval_run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Evaluation run with ID '{run_id}' not found.",
+        )
+
+    results = db.query(EvalResult).filter(EvalResult.run_id == run_uuid).all()
+    questions = load_sop_questions()
+    q_map = {q["id"]: q for q in questions}
+
+    all_chunk_ids: Set[str] = set()
+    for r in results:
+        if r.retrieved_ids and isinstance(r.retrieved_ids, list):
+            for cid in r.retrieved_ids:
+                all_chunk_ids.add(str(cid))
+
+    chunk_uuid_list = []
+    for cid_str in all_chunk_ids:
+        try:
+            chunk_uuid_list.append(uuid.UUID(cid_str))
+        except ValueError:
+            continue
+
+    parent_map: Dict[str, Tuple[str, str]] = {}
+    if chunk_uuid_list:
+        parents_query = (
+            db.query(Parent, Document.filename)
+            .join(Document, Parent.document_id == Document.id)
+            .filter(Parent.id.in_(chunk_uuid_list))
+            .all()
+        )
+        for p, fname in parents_query:
+            parent_map[str(p.id)] = (p.section_title or "", fname)
+
+        children_query = (
+            db.query(Child, Parent.section_title, Document.filename)
+            .join(Parent, Child.parent_id == Parent.id)
+            .join(Document, Child.document_id == Document.id)
+            .filter(Child.id.in_(chunk_uuid_list))
+            .all()
+        )
+        for c, p_sec, fname in children_query:
+            parent_map[str(c.id)] = (p_sec or "", fname)
+
+    items: List[QuestionEvalItem] = []
+    for r in results:
+        q_data = q_map.get(r.question_id, {})
+        rank_val = round(1.0 / r.reciprocal_rank) if r.reciprocal_rank > 0 else None
+
+        sec_titles = []
+        doc_names = []
+        if r.retrieved_ids and isinstance(r.retrieved_ids, list):
+            for cid in r.retrieved_ids:
+                sec_title, doc_name = parent_map.get(str(cid), ("", ""))
+                sec_titles.append(sec_title)
+                doc_names.append(doc_name)
+
+        items.append(
+            QuestionEvalItem(
+                question_id=r.question_id,
+                question=q_data.get("question"),
+                category=q_data.get("category", "single"),
+                paraphrased=bool(q_data.get("paraphrased", False)),
+                expected_doc=r.expected_doc,
+                expected_section=q_data.get("expected_section"),
+                hit=r.hit,
+                rank=rank_val,
+                reciprocal_rank=r.reciprocal_rank,
+                latency_ms=r.latency_ms,
+                retrieved_section_titles=sec_titles,
+                retrieved_docs=doc_names,
+            )
+        )
+
+    return items
+
 
