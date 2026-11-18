@@ -222,3 +222,25 @@ def test_parent_deduplication_keeps_best_child_and_fails_on_duplicates(db_sessio
 
     # 2. Assert the best child's score (0.91) was preserved
     assert abs(results[0].score - 0.91) < 1e-5, f"Expected best score 0.91, got {results[0].score}"
+
+
+def test_sparse_search_natural_language_and_exact_terms(db_session):
+    """Assert sparse full-text search matches natural-language questions and exact technical terms."""
+    # 1. Natural language question (which returned 0 matches under plainto_tsquery AND semantics)
+    nl_question = "What standard specification under ASTM D6319 dictates the barrier performance for medical nitrile examination gloves?"
+    hits, latency_ms = sparse_search(nl_question, top_k=10, db=db_session)
+    assert len(hits) > 0, "Sparse search must return hits for natural-language questions"
+    assert latency_ms > 0
+
+    # 2. Exact technical standard keyword
+    exact_kw = "ASTM D6319"
+    kw_hits, _ = sparse_search(exact_kw, top_k=5, db=db_session)
+    assert len(kw_hits) > 0, "Sparse search must match exact technical codes"
+    assert any("ASTM D6319" in child.text for child, _, _ in kw_hits)
+
+    # 3. Empty and whitespace queries return empty list safely
+    empty_hits, _ = sparse_search("", top_k=5, db=db_session)
+    assert empty_hits == []
+    ws_hits, _ = sparse_search("   ", top_k=5, db=db_session)
+    assert ws_hits == []
+

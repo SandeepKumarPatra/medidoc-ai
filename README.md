@@ -210,21 +210,25 @@ pytest backend/tests
 
 ## Evaluation & Demonstrations
 
-### Official Retrieval Ablation Benchmark (Phase 7 & 7b)
+### Official Retrieval Ablation Benchmark (Phase 7, 7b & 7c)
 
 Evaluated across 60 benchmark questions (top_k=5, no LLM):
 - Complete ablation and root-cause analysis is published in [docs/EVAL_RESULTS.md](file:///d:/GENaiMedicalProject/medidoc-ai/docs/EVAL_RESULTS.md).
 
 | Mode | Label / Model | All Hit@1 | All Hit@3 | All Hit@5 | All MRR | Latency (ms) | Single Hit@5 | Single MRR | Paraph Hit@5 | Paraph MRR | Keyword Hit@5 | Keyword MRR | Compound Both-Hit@5 | Compound MRR |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `naive` | Naive child vector search | 0.77 | 0.90 | 0.92 | 0.829 | 58.5ms | 0.98 | 0.924 | 0.92 | 0.722 | 1.00 | 0.938 | 0.50 | 0.198 |
-| `parent_child` | Dense child search with parent expansion | 0.77 | 0.90 | 0.92 | 0.835 | 33.7ms | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
-| `hybrid` | Dense + sparse full-text with RRF (k=60) | 0.77 | 0.90 | 0.92 | 0.835 | 35.2ms | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
-| `hybrid_rerank` | Hybrid with BAAI/bge-reranker-base | 0.73 | 0.92 | 0.95 | 0.830 | 2626.6ms | 0.98 | 0.893 | 0.92 | 0.674 | 1.00 | 0.938 | 0.75 | 0.375 |
-| `hybrid_rerank_minilm` | Hybrid with cross-encoder/ms-marco-MiniLM-L-6-v2 | 0.73 | 0.92 | 0.95 | 0.821 | 614.7ms | 0.98 | 0.895 | 0.92 | 0.711 | 1.00 | 0.938 | 0.75 | 0.302 |
+| `naive` | Naive child vector search | 0.77 | 0.90 | 0.92 | 0.829 | 62.1ms | 0.98 | 0.924 | 0.92 | 0.722 | 1.00 | 0.938 | 0.50 | 0.198 |
+| `parent_child` | Dense child search with parent expansion | 0.77 | 0.90 | 0.92 | 0.835 | 38.2ms | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
+| `hybrid` | Dense + sparse full-text with RRF (k=60) | 0.72 | 0.87 | 0.90 | 0.797 | 59.0ms | 0.93 | 0.864 | 0.75 | 0.562 | 1.00 | 0.938 | 0.62 | 0.292 |
+| `hybrid_rerank` | Hybrid with BAAI/bge-reranker-base | 0.73 | 0.92 | 0.92 | 0.817 | 2849.5ms | 0.93 | 0.879 | 0.83 | 0.639 | 1.00 | 0.938 | 0.75 | 0.354 |
+| `hybrid_rerank_minilm` | Hybrid with cross-encoder/ms-marco-MiniLM-L-6-v2 | 0.73 | 0.92 | 0.93 | 0.814 | 718.9ms | 0.95 | 0.883 | 0.83 | 0.669 | 1.00 | 0.938 | 0.75 | 0.312 |
 
 > **Operational Default Mode & Conclusion:**
-> We designate **`hybrid`** as the default operational retrieval mode for MediDoc AI. While cross-encoder reranking (`hybrid_rerank`) lifts compound multi-topic recall (`both-hit@5`) from 0.50 to 0.75 by re-scoring candidates across disparate policy domains, it incurs an extreme latency penalty on CPU (2626.6ms for BGE vs 35.2ms for Hybrid, a 75x slowdown) and marginally reduces top-1 precision (Hit@1 drops from 0.77 to 0.73). For production healthcare-IT workloads where sub-second responsiveness is essential, `hybrid` mode delivers optimal balance: identical 0.98 Hit@5 on single queries, 1.00 Hit@5 on keyword-sensitive terms (e.g. ASTM codes), 0.835 MRR, and 35.2ms latency. `hybrid_rerank` remains accessible as an opt-in strategy when answering multi-clause compound queries where complete context recall outweighs interactive latency.
+> Following the Phase 7c sparse search diagnosis and fix (OR-ing stemmed lexemes ranked by `ts_rank_cd`), full-text search actively participates in RRF fusion (differing in 10.0% of top-1 and 98.3% of top-5 results vs dense search). The ablation reveals distinct operational trade-offs:
+> - **`parent_child` (Dense-Only):** Delivers the highest overall Hit@1 (0.77), highest MRR (0.835), and strongest resilience against paraphrased queries (0.92 Hit@5 vs 0.75 for hybrid) at ultra-low latency (38.2ms). It is optimal for fast single-intent clinical Q&A where semantic intent dominates.
+> - **`hybrid` (RRF k=60):** Lifts compound multi-topic recall (`both-hit@5`) from 0.50 to 0.62 (MRR 0.292 vs 0.219) and guarantees 1.00 Hit@5 on exact technical codes (e.g. ASTM D6319, Section 501(r)), but introduces lexical interference on paraphrased queries without exact terminology.
+> - **`hybrid_rerank` (Cross-Encoder):** Re-scores candidates to achieve the highest compound multi-topic recall (0.75 Both-Hit@5) while mitigating hybrid lexical noise (restoring paraphrased Hit@5 to 0.83). The lightweight `ms-marco-MiniLM-L-6-v2` delivers this at 718.9ms latency (a 4x speedup over BGE on CPU).
+> - **Recommended Default:** We recommend **`parent_child`** as the default low-latency operational mode for standard interactive policy Q&A, while routing compound or code-heavy inquiries to **`hybrid`** or **`hybrid_rerank`** where multi-clause recall is paramount.
 
 ### Grounded Answer Synthesis & Refusal Guardrails (`--with-answers`)
 

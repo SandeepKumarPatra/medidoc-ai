@@ -1,11 +1,11 @@
-"""Sparse keyword retrieval using PostgreSQL full-text search (tsvector + plainto_tsquery)."""
+"""Sparse keyword retrieval using PostgreSQL full-text search (tsvector + tsquery)."""
 
 from __future__ import annotations
 
 import logging
 import time
 from typing import List, Tuple
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select, String
 from sqlalchemy.orm import Session
 
 from backend.app.db.models import Child, Document
@@ -18,7 +18,11 @@ def sparse_search(
     top_k: int,
     db: Session,
 ) -> Tuple[List[Tuple[Child, float, str]], float]:
-    """Execute full-text keyword search using PostgreSQL plainto_tsquery and ts_rank_cd.
+    """Execute full-text keyword search using PostgreSQL tsquery (OR-ed stemmed lexemes) and ts_rank_cd.
+
+    Derives stemmed content lexemes from plainto_tsquery and connects them with OR semantics,
+    ranking matching chunks by cover density (ts_rank_cd). This enables natural-language
+    query matching while preserving exact keyword term matching.
 
     Args:
         question: Natural language question.
@@ -31,7 +35,13 @@ def sparse_search(
           - Search execution latency in milliseconds
     """
     t0 = time.perf_counter()
-    ts_query = func.plainto_tsquery("english", question)
+    if not question or not question.strip():
+        return [], 0.0
+
+    # Derive stemmed content lexemes from plainto_tsquery and connect with OR semantics
+    plain_query = func.plainto_tsquery("english", question)
+    or_query_expr = func.replace(cast(plain_query, String), " & ", " | ")
+    ts_query = func.to_tsquery("english", or_query_expr)
     rank_expr = func.ts_rank_cd(Child.tsv, ts_query).label("rank")
 
     stmt = (

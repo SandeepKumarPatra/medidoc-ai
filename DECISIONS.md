@@ -150,3 +150,12 @@ This document tracks key architectural decisions, rationale, and documented trad
   - In answer synthesis, `hybrid_rerank` achieved 100% citation inclusion with 0 false refusals, while `hybrid` had 93.3% citation inclusion and 1 false refusal (6.7%).
   - Unanswerable guardrails proved 100% robust (8/8 correct refusals, 0 hallucinations).
   - Default mode choice: `hybrid` is recommended as the default operational mode because it delivers sub-36ms latency, highest Hit@1 (0.77), and 100% keyword Hit@5; `hybrid_rerank` is reserved for complex compound queries where multi-section recall outweighs latency.
+
+---
+
+## Decision 013: Phase 7c Sparse Search Diagnosis, OR-Lexeme tsquery Fix, and Retrieval Re-Ablation
+
+- **What was built:** Diagnosed that `plainto_tsquery` (boolean AND semantics) returned 0 matching chunks across all 60 evaluation questions; fixed `sparse_search` in `backend/app/retrieval/sparse.py` by converting stemmed content lexemes into OR-ed tsqueries ranked by cover density (`ts_rank_cd`) while keeping exact technical terms (e.g. ASTM D6319) functional; and re-ran the full 60-question retrieval ablation across all 5 modes.
+- **Why this design & Honest Findings:** Natural language questions contain 10–25 words that never appear simultaneously in 100-token child chunks under boolean AND, which previously masked hybrid search as identical to dense search (0.0% difference); OR-ing stemmed lexemes activates true RRF fusion (differing in 10.0% top-1 and 98.3% top-5), improving compound query `both-hit@5` from 50.0% to 62.5% in hybrid mode (and 75.0% in reranked modes) while preserving 100% keyword Hit@5, though introducing lexical noise on paraphrased queries that reduces hybrid Hit@1 from 0.77 to 0.72.
+- **Default Mode Conclusion:** Because `parent_child` achieves highest Hit@1 (0.77), highest MRR (0.835), and strongest resistance to paraphrased noise (0.92 Hit@5) at 38.2ms latency, it is now recommended as the low-latency default for interactive Q&A, while routing compound and code-heavy inquiries to `hybrid` or `hybrid_rerank` where multi-clause recall is critical.
+
