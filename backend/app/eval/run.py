@@ -73,8 +73,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=str,
-        default="docs/EVAL_RESULTS.md",
-        help="Output markdown file path (default: docs/EVAL_RESULTS.md)",
+        default="docs/EVAL_RESULTS_generated.md",
+        help="Output markdown file path (default: docs/EVAL_RESULTS_generated.md)",
     )
     parser.add_argument(
         "--top-k",

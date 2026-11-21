@@ -6,7 +6,7 @@ Supports:
 - Grounded answer evaluation (--with-answers) across 15 single questions with rate-limiting pauses
 - Clinical extraction evaluation (--with-extraction) across 8 synthetic reports
 - Database persistence to eval_runs and eval_results
-- Report generation to docs/EVAL_RESULTS.md
+- Report generation to docs/EVAL_RESULTS_generated.md
 """
 
 from __future__ import annotations
@@ -438,8 +438,15 @@ def generate_evaluation_markdown(
     extraction_summary: Optional[ExtractionEvalSummary] = None,
     output_path: Optional[Path] = None,
 ) -> str:
-    """Generate comprehensive EVAL_RESULTS.md report."""
-    target_path = output_path or (REPO_ROOT / "docs" / "EVAL_RESULTS.md")
+    """Generate comprehensive EVAL_RESULTS_generated.md report."""
+    target_path = output_path or (REPO_ROOT / "docs" / "EVAL_RESULTS_generated.md")
+    # Never overwrite the hand-written analysis in docs/EVAL_RESULTS.md
+    if target_path.resolve() == (REPO_ROOT / "docs" / "EVAL_RESULTS.md").resolve():
+        logger.warning(
+            "Preventing overwrite of hand-written %s. Writing generated tables to docs/EVAL_RESULTS_generated.md instead.",
+            target_path,
+        )
+        target_path = REPO_ROOT / "docs" / "EVAL_RESULTS_generated.md"
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     lines: List[str] = [

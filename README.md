@@ -95,10 +95,11 @@ GEMINI_API_KEY=your-gemini-api-key-here
 LLM_MODEL=gemini-3.1-flash-lite
 ```
 
+> **Note on Frontend Configuration:** `VITE_API_URL` is baked in at build time into the client bundle (defaults to `http://localhost:8000`). If changing the API host or port, rebuild the frontend container image (`docker compose up --build`).
+
 ### 3. Build & Start All Services
 Launch the database, FastAPI backend, and Nginx frontend:
 ```bash
-docker compose down -v
 docker compose up --build -d
 ```
 All containers initialize with automated healthchecks:
@@ -156,23 +157,63 @@ Evaluated over 60 curated clinical questions across 12 hospital SOPs (44 single-
 
 | Retrieval Mode | Configuration | All Hit@1 | All Hit@5 | All MRR | Latency (ms) | Compound Both-Hit@5 |
 |---|---|---|---|---|---|---|
-| `naive` | Dense child search (no expansion) | 0.77 | 0.92 | 0.829 | 62.1 ms | 0.50 (50.0%) |
-| `parent_child` | Dense child + parent expansion | **0.77** | **0.92** | **0.835** | **38.2 ms** | 0.50 (50.0%) |
-| `hybrid` *(Default)* | Dense + sparse FTS (RRF $k=60$) | 0.72 | 0.90 | 0.797 | 59.0 ms | **0.62 (62.5%)** |
-| `hybrid_rerank` | Hybrid + BGE Cross-Encoder | 0.73 | 0.92 | 0.817 | 2849.5 ms | **0.75 (75.0%)** |
-| `hybrid_rerank_minilm` | Hybrid + MiniLM Cross-Encoder | 0.73 | **0.93** | 0.814 | 718.9 ms | **0.75 (75.0%)** |
+| `naive` | Dense child search (no expansion) | 0.77 | 0.92 | 0.829 | 77.8 ms | 0.50 (50.0%) |
+| `parent_child` | Dense child + parent expansion | **0.77** | **0.92** | **0.835** | **35.2 ms** | 0.50 (50.0%) |
+| `hybrid` *(Default)* | Dense + sparse FTS (RRF $k=60$) | 0.72 | 0.90 | 0.797 | 66.5 ms | **0.62 (62.5%)** |
+| `hybrid_rerank` | Hybrid + BGE Cross-Encoder | 0.73 | 0.92 | 0.817 | 2963.3 ms | **0.75 (75.0%)** |
+| `hybrid_rerank_minilm` | Hybrid + MiniLM Cross-Encoder | 0.73 | **0.93** | 0.814 | 783.6 ms | **0.75 (75.0%)** |
+
+### Per-Category Results Breakdown
+
+| Retrieval Mode | Single Hit@5 | Single MRR | Paraph Hit@5 | Paraph MRR | Keyword Hit@5 | Keyword MRR | Compound Both-Hit@5 | Compound MRR |
+|---|---|---|---|---|---|---|---|---|
+| `naive` | 0.98 | 0.924 | 0.92 | 0.722 | 1.00 | 0.938 | 0.50 | 0.198 |
+| `parent_child` | 0.98 | 0.928 | 0.92 | 0.736 | 1.00 | 0.938 | 0.50 | 0.219 |
+| `hybrid` | 0.93 | 0.864 | 0.75 | 0.562 | 1.00 | 0.938 | 0.62 | 0.292 |
+| `hybrid_rerank` | 0.93 | 0.879 | 0.83 | 0.639 | 1.00 | 0.938 | 0.75 | 0.354 |
+| `hybrid_rerank_minilm` | 0.95 | 0.883 | 0.83 | 0.669 | 1.00 | 0.938 | 0.75 | 0.312 |
 
 ### Benchmark Findings
-- **Why `hybrid` is the Default:** Blending dense embeddings with sparse full-text search boosts compound multi-topic recall (`both-hit@5`) from 50.0% to 62.5% and maintains 100% keyword Hit@5 at sub-60ms latency without heavy transformer cross-encoders.
-- **Cross-Encoder Value & Cost:** Cross-encoders filter lexical noise on paraphrased queries and push compound recall to 75.0%, but impose a significant CPU latency penalty (~719ms for MiniLM, ~2850ms for BGE).
+- **Retrieval Performance & Default Selection:** `parent_child` has the best overall MRR (0.835) and Hit@5 (0.92) at 35.2 ms latency. `hybrid` is slightly lower overall (MRR 0.797, Hit@5 0.90) but gets compound recall of 5/8 (0.62) vs 4/8 (0.50) for `parent_child` (a difference of one question). The difference between the two modes is small, and `hybrid` is kept as default for exact-term queries and full-text keyword matching (maintaining 1.00 keyword Hit@5 at 66.5 ms).
+- **Cross-Encoder Value & Latency Trade-Off:** Cross-encoders push compound multi-topic recall (`both-hit@5`) to 0.75 (6/8), but impose a significant CPU latency penalty (783.6 ms for MiniLM, 2963.3 ms for BGE). They do not improve paraphrased queries over pure dense `parent_child` (which achieves 0.92 Hit@5 vs 0.83 for cross-encoders).
 - **Refusal Guardrails:** Tested across 8 out-of-domain clinical questions (e.g., NICU service animal rules, MRI cooling flow rates); the `/ask` pipeline achieved **100% correct refusals (8/8)** with 0 hallucinations.
+
+### Grounded Answer Synthesis & Guardrails (`--with-answers`)
+
+| Metric | Hybrid Mode | Hybrid Rerank Mode | Operational Description |
+|---|---|---|---|
+| **Citation Inclusion Rate** | **93.3%** | **100.0%** | Share of generated answers whose citations include ground-truth document |
+| **Cited Source Lexical Overlap** | **100.0%** | **100.0%** | Share of cited sources whose text contains key numbers/terms from answer |
+| **Wrong 'Not Found' Refusals** | **1 (6.7%)** | **0 (0.0%)** | False refusals despite relevant context in database |
+| **Average Generation Latency** | **2164.8 ms** | **1983.7 ms** | Mean LLM token generation latency |
+
+### Clinical Extraction & Rule Validation (`--with-extraction`)
+
+Evaluated on 8 synthetic discharge summaries and lab reports against companion ground-truth JSON files:
+
+| Clinical Schema Field | Result | Description |
+|---|---|---|
+| `patient.age` | **100.0%** | Exact value match against companion ground truth |
+| `patient.sex` | **100.0%** | Exact value match against companion ground truth |
+| `admission_date` | **100.0%** | Exact value match against companion ground truth |
+| `discharge_date` | **100.0%** | Exact value match against companion ground truth |
+| `diagnosis` | **100.0%** | Exact value / set match against companion ground truth |
+| `medications` | **100.0%** | Exact value / set match against companion ground truth |
+| `summary` | **100.0% (summary present)** | Completion heuristic ($\ge$15 non-whitespace chars), verifying summary present rather than exact-match accuracy |
+| **Overall Field Accuracy** | **100.0%** | Mean accuracy across structured clinical fields |
+
+| Validation Metric | Score | Clinical Impact |
+|---|---|---|
+| **Precision** | **100.0%** | True validation issues detected vs total flagged |
+| **Recall** | **100.0%** | Expected deliberate compliance errors caught |
+| **F1 Score** | **1.000** | Harmonic mean of issue detection |
 
 ---
 
 ## Honest Limitations & Trade-Offs
 
 1. **Synthetic Data Boundary:** All SOP policies, clinical discharge summaries, lab reports, patient demographics, and MRNs are generated programmatically. The system has not been tested on real-world electronic health record (EHR) databases.
-2. **Template-Based Extraction Smoke Test:** The clinical extraction benchmark scores accuracy against 8 synthetic report templates. It verifies schema parsing, PII redaction, and rule validation integrity, but does not substitute for a clinical NLP trial on heterogeneous physician dictation.
+2. **Template-Based Extraction Smoke Test:** The clinical extraction benchmark scores accuracy against 8 synthetic report templates. It verifies schema parsing, PII redaction, and rule validation integrity, but does not substitute for a clinical NLP trial on heterogeneous physician dictation. For the clinical narrative `summary` field, the benchmark verifies that a substantive summary is present ($\ge$15 characters) rather than measuring accuracy.
 3. **PII Masking Boundary:** Labelled demographic headers (`Patient:`, `MRN:`, `Phone:`, `Email:`) and regex patterns reliably capture standardized hospital identifier formats. However, unlabelled proper names embedded within unstructured narrative prose can occasionally escape regex matching without heavy clinical NER models that risk false positives on clinical terminology.
 4. **Hardware Latency Differences:** CPU execution of cross-encoder reranking requires ~0.7s to ~2.8s per query; GPU acceleration is recommended if deploying reranked modes in production.
 
