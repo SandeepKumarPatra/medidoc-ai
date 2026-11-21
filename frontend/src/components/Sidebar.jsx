@@ -1,9 +1,27 @@
 import React from 'react';
-import { MessageSquareText, FileText, ShieldAlert } from 'lucide-react';
+import {
+  LayoutDashboard,
+  BarChart2,
+  MessageSquareText,
+  FileText,
+  ShieldAlert,
+} from 'lucide-react';
 import ApiStatusBadge from './ApiStatusBadge';
 
 export default function Sidebar({ activeScreen, onSelectScreen }) {
   const navItems = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: LayoutDashboard,
+      description: 'System metrics & audit feed',
+    },
+    {
+      id: 'eval',
+      label: 'Evaluation',
+      icon: BarChart2,
+      description: 'Retrieval ablation & MRR benchmarks',
+    },
     {
       id: 'qa',
       label: 'Policy Q&A',
@@ -35,7 +53,7 @@ export default function Sidebar({ activeScreen, onSelectScreen }) {
         {/* Navigation links */}
         <div className="space-y-1">
           <div className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-            Workspaces
+            Navigation
           </div>
           {navItems.map((item) => {
             const Icon = item.icon;

@@ -138,3 +138,34 @@ export async function extractDocument(pdfFile) {
     body: formData,
   });
 }
+
+/**
+ * Fetch aggregated statistics across documents, extractions, validation, and audit logs.
+ * GET /stats/overview
+ */
+export async function getStatsOverview() {
+  return fetchWithTimeout(`${API_BASE_URL}/stats/overview`, { method: 'GET' });
+}
+
+/**
+ * Fetch recent audit log entries and historical usage trends.
+ * GET /stats/audit
+ * @param {number} [limit=10]
+ * @param {string|null} [endpoint=null]
+ */
+export async function getStatsAudit(limit = 10, endpoint = null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (endpoint) {
+    params.append('endpoint', endpoint);
+  }
+  return fetchWithTimeout(`${API_BASE_URL}/stats/audit?${params.toString()}`, { method: 'GET' });
+}
+
+/**
+ * Fetch latest retrieval evaluation results and ablation metrics across modes.
+ * GET /eval/results
+ */
+export async function getEvalResults() {
+  return fetchWithTimeout(`${API_BASE_URL}/eval/results`, { method: 'GET' });
+}
+

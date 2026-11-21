@@ -166,4 +166,13 @@ This document tracks key architectural decisions, rationale, and documented trad
 - **What was built:** Initialized `frontend/` using Vite, React, and Tailwind CSS with API client connecting to `VITE_API_URL` (default `http://localhost:8000`), a navigation sidebar with live `GET /health` API status probe, a Policy Q&A screen (`POST /ask`) featuring retrieval mode selection (`hybrid` default), top_k tuning, generation and calculated retrieval latency chips, and grounded source provenance, alongside a Document Extraction workspace (`POST /extract`) presenting clinical JSON summaries, PII redaction metrics, and validation rule findings in a badge-coded table with 60s request timeouts.
 - **Why this design:** Building a decoupled single-page application shell with strict 60-second timeouts, explicit 422 validation parsing, and structured metadata display ensures clinicians can interactively query policies and review extracted discharge reports with zero exposure of raw underlying clinical text, strictly preserving clinical privacy rules while maintaining high responsiveness.
 
+---
+
+## Decision 015: Phase 6a Analytics and Evaluation Dashboards
+
+- **What was built:** Added Overview (`GET /stats/overview`, `GET /stats/audit`) and Evaluation (`GET /eval/results`) dashboard screens to the React frontend with Recharts visualizations (corpus distribution, MRR per mode, retrieval latency per mode), ablation summary tables with compound both-hit@5 scoring, KPI cards, and privacy audit logs.
+- **Why this design:** Integrating empirical retrieval metrics and real-time audit logging directly into the web application provides healthcare IT administrators with immediate visibility into RAG model trade-offs (highlighting why `hybrid` is the balanced production default over high-latency cross-encoders) while guaranteeing zero raw document text or protected health information is ever rendered.
+- **Documented Known Limitations & Findings:** Retrieval benchmarks reflect the curated 60-question synthetic SOP evaluation suite, and clinical extraction metrics represent smoke tests over synthetic discharge/lab reports; cross-encoder reranking yields higher compound both-hit recall (75% vs 62.5%) but carries a ~48x CPU latency penalty.
+
+
 
