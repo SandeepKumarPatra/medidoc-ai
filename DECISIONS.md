@@ -174,5 +174,14 @@ This document tracks key architectural decisions, rationale, and documented trad
 - **Why this design:** Integrating empirical retrieval metrics and real-time audit logging directly into the web application provides healthcare IT administrators with immediate visibility into RAG model trade-offs (highlighting why `hybrid` is the balanced production default over high-latency cross-encoders) while guaranteeing zero raw document text or protected health information is ever rendered.
 - **Documented Known Limitations & Findings:** Retrieval benchmarks reflect the curated 60-question synthetic SOP evaluation suite, and clinical extraction metrics represent smoke tests over synthetic discharge/lab reports; cross-encoder reranking yields higher compound both-hit recall (75% vs 62.5%) but carries a ~48x CPU latency penalty.
 
+---
+
+## Decision 016: Phase 8 Multi-Container Packaging, Model Caching, and End-to-End Orchestration
+
+- **What was built:** Authored multi-stage `frontend/Dockerfile` (Node 22 build + Nginx Alpine) and `backend/Dockerfile` (Python 3.12-slim), enabled all three services in `docker-compose.yml` with healthcheck synchronization, wired environment variable overrides for PostgreSQL connectivity, mounted named volume `medidoc_hf_cache` for Hugging Face weights, and rewrote `README.md` with containerized operations, full ablation data, and documented limits.
+- **Why this design:** Multi-container orchestration with PostgreSQL `pg_isready` healthcheck gating eliminates startup race conditions; named cache volumes cut container restart latency from over 30s to under 2s by persisting Hugging Face embeddings and cross-encoder models; and serving the compiled Vite bundle via Nginx provides performant static file delivery and client SPA routing.
+- **Verification:** Tested clean-slate lifecycle (`docker compose down -v` -> `docker compose up --build -d`), verified HTTP 200 on `GET /health` and frontend port 5173, and executed in-container synthetic SOP ingestion, extraction, and benchmark query execution via `scripts/seed_demo_data.py`.
+
+
 
 
