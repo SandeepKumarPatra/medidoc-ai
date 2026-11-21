@@ -94,12 +94,7 @@ export default function Evaluation() {
       <header className="bg-white border-b border-slate-200 px-8 py-5 shrink-0 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2">
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-100 text-brand-800 border border-brand-200">
-                Phase 6a
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Retrieval Evaluation & Ablation</h2>
-            </div>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Retrieval Evaluation & Ablation</h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Empirical multi-mode benchmark metrics, Mean Reciprocal Rank (MRR), and recall on compound queries.
             </p>

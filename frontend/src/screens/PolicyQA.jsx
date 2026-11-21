@@ -66,12 +66,7 @@ export default function PolicyQA() {
       <header className="bg-white border-b border-slate-200 px-8 py-5 shrink-0 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2">
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-100 text-brand-800 border border-brand-200">
-                Phase 5a
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Policy Q&A Workspace</h2>
-            </div>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Policy Q&A Workspace</h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Evidence-based hospital policy retrieval with deterministic citations and latency breakdown.
             </p>

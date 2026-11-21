@@ -84,12 +84,7 @@ export default function DocumentExtraction() {
     <div className="flex-1 flex flex-col h-screen overflow-y-auto bg-slate-50">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-8 py-5 shrink-0 shadow-sm">
-        <div className="flex items-center space-x-2">
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-100 text-brand-800 border border-brand-200">
-            Phase 5a
-          </span>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Document Extraction Workspace</h2>
-        </div>
+        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Document Extraction Workspace</h2>
         <p className="text-xs text-slate-500 mt-0.5">
           Automated clinical document parsing, PII redaction, structured JSON extraction, and rule validation.
         </p>
