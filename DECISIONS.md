@@ -159,3 +159,11 @@ This document tracks key architectural decisions, rationale, and documented trad
 - **Why this design & Honest Findings:** Natural language questions contain 10–25 words that never appear simultaneously in 100-token child chunks under boolean AND, which previously masked hybrid search as identical to dense search (0.0% difference); OR-ing stemmed lexemes activates true RRF fusion (differing in 10.0% top-1 and 98.3% top-5), improving compound query `both-hit@5` from 50.0% to 62.5% in hybrid mode (and 75.0% in reranked modes) while preserving 100% keyword Hit@5, though introducing lexical noise on paraphrased queries that reduces hybrid Hit@1 from 0.77 to 0.72.
 - **Default Mode Conclusion:** Because `parent_child` achieves highest Hit@1 (0.77), highest MRR (0.835), and strongest resistance to paraphrased noise (0.92 Hit@5) at 38.2ms latency, it is now recommended as the low-latency default for interactive Q&A, while routing compound and code-heavy inquiries to `hybrid` or `hybrid_rerank` where multi-clause recall is critical.
 
+---
+
+## Decision 014: Phase 5a React Frontend Shell and Core Clinical Workspaces
+
+- **What was built:** Initialized `frontend/` using Vite, React, and Tailwind CSS with API client connecting to `VITE_API_URL` (default `http://localhost:8000`), a navigation sidebar with live `GET /health` API status probe, a Policy Q&A screen (`POST /ask`) featuring retrieval mode selection (`hybrid` default), top_k tuning, generation and calculated retrieval latency chips, and grounded source provenance, alongside a Document Extraction workspace (`POST /extract`) presenting clinical JSON summaries, PII redaction metrics, and validation rule findings in a badge-coded table with 60s request timeouts.
+- **Why this design:** Building a decoupled single-page application shell with strict 60-second timeouts, explicit 422 validation parsing, and structured metadata display ensures clinicians can interactively query policies and review extracted discharge reports with zero exposure of raw underlying clinical text, strictly preserving clinical privacy rules while maintaining high responsiveness.
+
+
